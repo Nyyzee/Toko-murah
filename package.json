@@ -1,7 +1,7 @@
 {
-  "name": "telegram-dana-bot",
+  "name": "browser-digital-store",
   "version": "2.0.0",
-  "description": "Telegram Bot Top Up DANA & Game — dengan sistem saldo reseller PostgreSQL",
+  "description": "Browser digital store with PostgreSQL balance, QRIS deposits, and Telegram admin notifications",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
