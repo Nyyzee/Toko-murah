@@ -20,7 +20,6 @@ for (const key of requiredEnv) {
 module.exports = {
     BOT_TOKEN:        process.env.BOT_TOKEN || "",
     OWNER_CHAT_ID:    process.env.OWNER_CHAT_ID || "",
-    REKAP_GROUP_ID:   process.env.REKAP_GROUP_ID || "",
     DATABASE_URL:     process.env.DATABASE_URL,
     SESSION_SECRET:   process.env.SESSION_SECRET,
     DASHBOARD_KEY:    process.env.DASHBOARD_KEY,
