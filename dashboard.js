@@ -8,14 +8,17 @@ const {
     DASHBOARD_KEY,
     DANA_QR_STRING,
     SESSION_SECRET,
-    PORT,
-    REKAP_GROUP_ID
+    OWNER_CHAT_ID,
+    PORT
 } = require("./config");
 const {
     authenticateCustomer,
     createCustomer,
     getCustomerById,
     getAllCustomers,
+    updateCustomer,
+    adjustCustomerSaldo,
+    deleteCustomer,
     createDepositRequest,
     getCustomerDeposits,
     getAdminDeposits,
@@ -26,22 +29,30 @@ const {
     getAdminTransactions,
     getAdminSummary,
     getCatalogProducts,
-    getNextCatalogNominal,
     createCatalogProduct,
     updateCatalogProduct,
     deactivateCatalogProduct,
-    bulkUpdateCatalogProducts
+    deleteCatalogProduct,
+    bulkUpdateCatalogProducts,
+    getNextCatalogNominal,
+    getAppSetting,
+    setAppSetting,
+    getMarkupPersen,
+    getSyncConfig,
+    saveSyncConfig,
+    replaceCatalogProducts
 } = require("./db");
 const {
-    categories,
     getSellingPrice,
     applyDatabaseCatalog,
     getCatalogGroups,
     getProductByKode,
-    loadProductsFromDB
+    loadProductsFromDB,
+    reloadMarkup,
+    getCurrentMarkupPersen
 } = require("./products");
 const productStore = require("./products");
-const { topup, fetchCatalogProducts } = require("./tokovoucher");
+const { topup, fetchCatalogOptions, fetchCatalogFiltered } = require("./tokovoucher");
 const { generateDynamicQRIS } = require("./qris");
 const { generateRefId } = require("./utils");
 const { registerWebhookRoutes } = require("./webhook");
@@ -62,9 +73,7 @@ function authorized(req) {
 
 function requireDashboardKey(req, res, next) {
     if (!DASHBOARD_KEY) {
-        return res.status(503).json({
-            error: "DASHBOARD_KEY belum diatur di Variables service."
-        });
+        return res.status(503).json({ error: "DASHBOARD_KEY belum diatur." });
     }
     if (!authorized(req)) {
         return res.status(401).json({ error: "Kunci dashboard tidak benar." });
@@ -72,69 +81,18 @@ function requireDashboardKey(req, res, next) {
     next();
 }
 
-function categoryExists(id) {
-    return categories.some(category => category.id === id);
-}
-
-function parseProductPayload(body, allowAutoNominal = false) {
-    const label = String(body.label || "").trim();
-    const kode = String(body.kode || "").trim();
-    const kategoriId = String(body.kategoriId || "").trim();
-    const autoNominal = allowAutoNominal && body.autoNominal === true;
-    const nominal = autoNominal ? null : Number(body.nominal);
-    const hargaJual = body.hargaJual === "" || body.hargaJual === null ||
-        body.hargaJual === undefined
-        ? null
-        : Number(body.hargaJual);
-
-    if (label.length < 2 || label.length > 200) {
-        throw new Error("Nama produk harus 2 sampai 200 karakter.");
-    }
-    if (!/^[a-zA-Z0-9._-]{2,120}$/.test(kode)) {
-        throw new Error("Kode produk hanya boleh berisi huruf, angka, titik, garis bawah, dan strip.");
-    }
-    if (!categoryExists(kategoriId)) {
-        throw new Error("Kategori produk tidak ditemukan.");
-    }
-    if (!autoNominal && (!Number.isSafeInteger(nominal) || nominal < 0)) {
-        throw new Error("Harga modal harus berupa angka bulat 0 atau lebih.");
-    }
-    if (hargaJual !== null && (!Number.isSafeInteger(hargaJual) || hargaJual < 0)) {
-        throw new Error("Harga jual harus berupa angka bulat 0 atau lebih.");
-    }
-
-    return {
-        label,
-        kode,
-        kategoriId,
-        nominal,
-        hargaJual,
-        metadata: {},
-        autoNominal,
-        nominalStep: Number(body.nominalStep || 1000)
-    };
-}
-
 function publicProduct(row) {
-    const category = categories.find(item => item.id === row.kategori_id);
-    const product = {
-        label: row.label,
-        kode: row.kode,
-        nominal: Number(row.nominal),
-        ...(row.harga_jual === null || row.harga_jual === undefined
-            ? {}
-            : { hargaJual: Number(row.harga_jual) }),
-        kategori: category
-    };
     return {
-        id: row.id,
+        id: Number(row.id),
         kode: row.kode,
         label: row.label,
         kategoriId: row.kategori_id,
-        kategoriLabel: category ? category.label : row.kategori_id,
-        nominal: Number(row.nominal),
+        kategoriLabel: row.kategori_label || row.kategori_id,
+        groupId: row.group_id || "lainnya",
+        operator: row.operator || "",
+        jenisProduk: row.jenis_produk || "",
+        nominal: Number(row.nominal || 0),
         hargaJual: row.harga_jual === null ? null : Number(row.harga_jual),
-        hargaJualEfektif: getSellingPrice(product),
         active: row.active,
         updatedAt: row.updated_at
     };
@@ -150,146 +108,6 @@ function sendError(res, error) {
     const duplicate = /duplicate key|unique constraint/i.test(message);
     return res.status(duplicate ? 409 : 400).json({
         error: duplicate ? "Kode produk sudah digunakan." : message
-    });
-}
-
-function parseBulkPayload(body) {
-    const kategoriId = String(body.kategoriId || "").trim();
-    const namaContains = String(body.namaContains || "").trim();
-    const nominalStart = body.nominalStart === "" || body.nominalStart === null ||
-        body.nominalStart === undefined ? null : Number(body.nominalStart);
-    const nominalStep = body.nominalStep === "" || body.nominalStep === null ||
-        body.nominalStep === undefined ? null : Number(body.nominalStep);
-    const hargaJualMode = String(body.hargaJualMode || "keep");
-    const hargaJual = body.hargaJual === "" || body.hargaJual === null ||
-        body.hargaJual === undefined ? null : Number(body.hargaJual);
-
-    if (!kategoriId && !namaContains) {
-        throw new Error("Pilih kategori atau isi nama produk sebagai sasaran edit massal.");
-    }
-    if (kategoriId && !categoryExists(kategoriId)) {
-        throw new Error("Kategori produk tidak ditemukan.");
-    }
-    if (namaContains.length > 200) {
-        throw new Error("Pencarian nama terlalu panjang.");
-    }
-    if (nominalStart !== null && (!Number.isSafeInteger(nominalStart) || nominalStart < 0)) {
-        throw new Error("Nominal awal harus berupa angka bulat 0 atau lebih.");
-    }
-    if (nominalStep !== null && (!Number.isSafeInteger(nominalStep) || nominalStep < 1)) {
-        throw new Error("Jarak nominal minimal 1.");
-    }
-    if ((nominalStart === null) !== (nominalStep === null)) {
-        throw new Error("Nominal awal dan jarak nominal harus diisi bersama.");
-    }
-    if (!["keep", "set", "clear"].includes(hargaJualMode)) {
-        throw new Error("Mode harga jual tidak valid.");
-    }
-    if (hargaJualMode === "set" &&
-        (!Number.isSafeInteger(hargaJual) || hargaJual < 0)) {
-        throw new Error("Harga jual massal harus berupa angka bulat 0 atau lebih.");
-    }
-
-    if (nominalStart === null && hargaJualMode === "keep") {
-        throw new Error("Isi perubahan nominal atau harga jual terlebih dahulu.");
-    }
-
-    return {
-        kategoriId,
-        namaContains,
-        nominalStart,
-        nominalStep,
-        hargaJualMode,
-        hargaJual
-    };
-}
-
-function registerDashboardRoutes(app) {
-    app.get(["/dashboard", "/dashboard/"], (req, res) => {
-        res.type("html").send(dashboardHtml);
-    });
-
-    app.get("/api/dashboard/categories", requireDashboardKey, (req, res) => {
-        res.json(categories.map(category => ({
-            id: category.id,
-            label: category.label
-        })));
-    });
-
-    app.get("/api/dashboard/products", requireDashboardKey, async (req, res) => {
-        try {
-            const rows = await getCatalogProducts(true);
-            res.json(rows.map(publicProduct));
-        } catch (error) {
-            sendError(res, error);
-        }
-    });
-
-    app.post("/api/dashboard/products", requireDashboardKey, async (req, res) => {
-        try {
-            const product = parseProductPayload(req.body || {}, true);
-            if (product.autoNominal) {
-                if (!Number.isSafeInteger(product.nominalStep) || product.nominalStep < 1) {
-                    throw new Error("Jarak nominal minimal 1.");
-                }
-                product.nominal = await getNextCatalogNominal(
-                    product.kategoriId,
-                    product.nominalStep
-                );
-            }
-            const created = await createCatalogProduct(product);
-            await refreshInMemoryCatalog();
-            res.status(201).json(publicProduct(created));
-        } catch (error) {
-            sendError(res, error);
-        }
-    });
-
-    app.put("/api/dashboard/products/bulk", requireDashboardKey, async (req, res) => {
-        try {
-            const bulk = parseBulkPayload(req.body || {});
-            const result = await bulkUpdateCatalogProducts(bulk);
-            await refreshInMemoryCatalog();
-            res.json({
-                ok: true,
-                updatedCount: result.updatedCount,
-                message: `${result.updatedCount} produk berhasil diperbarui.`
-            });
-        } catch (error) {
-            sendError(res, error);
-        }
-    });
-
-    app.put("/api/dashboard/products/:id", requireDashboardKey, async (req, res) => {
-        try {
-            const id = Number(req.params.id);
-            if (!Number.isSafeInteger(id) || id < 1) {
-                throw new Error("ID produk tidak valid.");
-            }
-            const product = parseProductPayload(req.body || {});
-            product.active = req.body.active !== false;
-            const updated = await updateCatalogProduct(id, product);
-            if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan." });
-            await refreshInMemoryCatalog();
-            res.json(publicProduct(updated));
-        } catch (error) {
-            sendError(res, error);
-        }
-    });
-
-    app.delete("/api/dashboard/products/:id", requireDashboardKey, async (req, res) => {
-        try {
-            const id = Number(req.params.id);
-            if (!Number.isSafeInteger(id) || id < 1) {
-                throw new Error("ID produk tidak valid.");
-            }
-            const removed = await deactivateCatalogProduct(id);
-            if (!removed) return res.status(404).json({ error: "Produk tidak ditemukan." });
-            await refreshInMemoryCatalog();
-            res.json({ ok: true });
-        } catch (error) {
-            sendError(res, error);
-        }
     });
 }
 
@@ -396,12 +214,8 @@ function normalizeProviderStatus(response) {
         response?.data?.data?.status ??
         ""
     ).toLowerCase();
-    if (["sukses", "success", "berhasil", "selesai", "1"].includes(value)) {
-        return "success";
-    }
-    if (["gagal", "failed", "error", "0"].includes(value)) {
-        return "failed";
-    }
+    if (["sukses", "success", "berhasil", "selesai", "1"].includes(value)) return "success";
+    if (["gagal", "failed", "error", "0"].includes(value)) return "failed";
     return "processing";
 }
 
@@ -428,18 +242,23 @@ function publicCatalogProduct(product) {
     };
 }
 
-function sendDepositNotification(bot, deposit, amount) {
-    if (!bot || !REKAP_GROUP_ID) return;
+// Notifikasi deposit ke OWNER_CHAT_ID dengan tombol approve/reject
+function sendDepositNotification(bot, deposit, amount, username) {
+    if (!bot || !OWNER_CHAT_ID) {
+        console.warn("[TELEGRAM DEPOSIT] Bot atau OWNER_CHAT_ID tidak diisi, notifikasi dilewati.");
+        return;
+    }
     const text =
-        "DEPOSIT BARU\n" +
-        `Ref: ${deposit.request_ref}\n` +
-        `Customer ID: ${deposit.customer_id}\n` +
-        `Nominal: Rp${Number(amount).toLocaleString("id-ID")}`;
-    bot.sendMessage(REKAP_GROUP_ID, text, {
+        "ð° DEPOSIT BARU MASUK\n" +
+        `ð¤ Customer: @${username || deposit.customer_id}\n` +
+        `ðµ Nominal: Rp${Number(amount).toLocaleString("id-ID")}\n` +
+        `ð Ref: ${deposit.request_ref}\n\n` +
+        `Setujui atau tolak deposit ini:`;
+    bot.sendMessage(OWNER_CHAT_ID, text, {
         reply_markup: {
             inline_keyboard: [[
-                { text: "Setujui", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
-                { text: "Tolak", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
+                { text: "â Setujui", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
+                { text: "â Tolak", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
             ]]
         }
     }).catch(error => console.error("[TELEGRAM DEPOSIT]", error.message));
@@ -448,7 +267,7 @@ function sendDepositNotification(bot, deposit, amount) {
 function startWebApp(bot) {
     const app = express();
     app.set("trust proxy", 1);
-    app.use(express.json({ limit: "32kb" }));
+    app.use(express.json({ limit: "64kb" }));
     app.use(express.urlencoded({ extended: false, limit: "32kb" }));
     app.use((req, res, next) => {
         req.webSession = readWebSession(req);
@@ -457,6 +276,11 @@ function startWebApp(bot) {
 
     app.get("/healthz", (req, res) => res.json({ ok: true }));
     app.get("/", (req, res) => res.type("html").send(dashboardHtml));
+    app.get("/dashboard", (req, res) => res.type("html").send(dashboardHtml));
+
+    // =========================================
+    // AUTH
+    // =========================================
 
     app.post("/api/auth/register", async (req, res) => {
         try {
@@ -515,10 +339,18 @@ function startWebApp(bot) {
         res.json({ ok: true });
     });
 
+    // =========================================
+    // KATALOG (customer)
+    // =========================================
+
     app.get("/api/catalog", requireCustomer, (req, res) => {
         const products = productStore.catalog.map(publicCatalogProduct);
         res.json({ groups: getCatalogGroups(productStore.catalog), products });
     });
+
+    // =========================================
+    // DEPOSIT (customer)
+    // =========================================
 
     app.get("/api/customer/deposits", requireCustomer, async (req, res) => {
         const deposits = await getCustomerDeposits(req.webSession.customerId);
@@ -543,7 +375,10 @@ function startWebApp(bot) {
                 margin: 1,
                 width: 420
             });
-            sendDepositNotification(bot, deposit, amount);
+            // Kirim notifikasi ke admin dengan tombol approve/reject
+            const customer = await getCustomerById(req.webSession.customerId);
+            sendDepositNotification(bot, deposit, amount, customer?.username);
+
             res.status(201).json({
                 deposit: {
                     ...depositPayload(deposit),
@@ -554,6 +389,10 @@ function startWebApp(bot) {
             res.status(400).json({ error: error.message });
         }
     });
+
+    // =========================================
+    // TRANSAKSI (customer)
+    // =========================================
 
     app.get("/api/customer/transactions", requireCustomer, async (req, res) => {
         res.json({
@@ -603,9 +442,9 @@ function startWebApp(bot) {
                     providerReference(providerResponse, requestRef),
                     providerResponse
                 );
-            const customer = await getCustomerById(req.webSession.customerId);
+            const customerUpdated = await getCustomerById(req.webSession.customerId);
             res.status(201).json({
-                customer: customerPayload(customer),
+                customer: customerPayload(customerUpdated),
                 transaction: {
                     requestRef: updated.request_ref,
                     productLabel: updated.product_label,
@@ -618,41 +457,251 @@ function startWebApp(bot) {
         }
     });
 
+    // =========================================
+    // ADMIN â Ringkasan & Data
+    // =========================================
+
     app.get("/api/admin/summary", requireAdmin, async (req, res) => {
-        res.json(await getAdminSummary());
+        const summary = await getAdminSummary();
+        summary.markupPersen = getCurrentMarkupPersen();
+        res.json(summary);
     });
+
     app.get("/api/admin/customers", requireAdmin, async (req, res) => {
         res.json({ customers: await getAllCustomers() });
     });
+
+    app.put("/api/admin/customers/:id", requireAdmin, async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID tidak valid.");
+            const updated = await updateCustomer(id, req.body || {});
+            if (!updated) return res.status(404).json({ error: "Customer tidak ditemukan." });
+            res.json({ customer: updated });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/admin/customers/:id/adjust-saldo", requireAdmin, async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            const amount = Number(req.body?.amount);
+            const operation = String(req.body?.operation || "add");
+            if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID tidak valid.");
+            const updated = await adjustCustomerSaldo(id, amount, operation);
+            res.json({ customer: updated });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.delete("/api/admin/customers/:id", requireAdmin, async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID tidak valid.");
+            const removed = await deleteCustomer(id);
+            if (!removed) return res.status(404).json({ error: "Customer tidak ditemukan." });
+            res.json({ ok: true });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
     app.get("/api/admin/deposits", requireAdmin, async (req, res) => {
         res.json({ deposits: await getAdminDeposits() });
     });
-    app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
-        res.json({ transactions: await getAdminTransactions() });
-    });
+
     app.post("/api/admin/deposits/:id/decision", requireAdmin, async (req, res) => {
         try {
             const result = await decideDeposit(
                 Number(req.params.id),
-                String(req.body?.status || "")
+                String(req.body?.status || ""),
+                String(req.body?.adminNote || "")
             );
+            // Kirim notifikasi Telegram ke admin setelah memproses dari dashboard
+            if (bot && OWNER_CHAT_ID) {
+                const statusText = result.status === "approved" ? "DITERIMA â" : "DITOLAK â";
+                bot.sendMessage(
+                    OWNER_CHAT_ID,
+                    `Deposit ${statusText}\n` +
+                    `ð¤ @${result.username}\n` +
+                    `ð° Rp${Number(result.amount).toLocaleString("id-ID")}`
+                ).catch(() => {});
+            }
             res.json({ deposit: depositPayload(result) });
         } catch (error) {
             res.status(400).json({ error: error.message });
         }
     });
-    app.post("/api/admin/products/sync", requireAdmin, async (req, res) => {
+
+    app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
+        res.json({ transactions: await getAdminTransactions() });
+    });
+
+    // =========================================
+    // ADMIN â Produk CRUD
+    // =========================================
+
+    app.get("/api/admin/products", requireAdmin, async (req, res) => {
         try {
-            const products = await fetchCatalogProducts();
-            const result = await require("./db").replaceCatalogProducts(products);
-            await loadProductsFromDB();
-            res.json(result);
+            const rows = await getCatalogProducts(true);
+            res.json({ products: rows.map(publicProduct) });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/admin/products", requireAdmin, async (req, res) => {
+        try {
+            const body = req.body || {};
+            if (!body.label || String(body.label).trim().length < 2) throw new Error("Nama produk minimal 2 karakter.");
+            if (!body.kode || !/^[a-zA-Z0-9._-]{2,120}$/.test(String(body.kode).trim())) throw new Error("Kode produk tidak valid.");
+            const nominal = Number(body.nominal);
+            if (!Number.isSafeInteger(nominal) || nominal < 0) throw new Error("Nominal tidak valid.");
+
+            const created = await createCatalogProduct({
+                kode: String(body.kode).trim(),
+                label: String(body.label).trim(),
+                kategoriId: String(body.kategoriId || "lainnya").trim(),
+                kategoriLabel: String(body.kategoriLabel || body.kategoriId || "Lainnya").trim(),
+                groupId: String(body.groupId || "lainnya").trim(),
+                operator: String(body.operator || "").trim(),
+                jenisProduk: String(body.jenisProduk || "").trim(),
+                nominal,
+                hargaJual: body.hargaJual !== "" && body.hargaJual != null ? Number(body.hargaJual) : null
+            });
+            await refreshInMemoryCatalog();
+            res.status(201).json({ product: publicProduct(created) });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.put("/api/admin/products/:id", requireAdmin, async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID tidak valid.");
+            const body = req.body || {};
+            const nominal = Number(body.nominal);
+            if (!Number.isSafeInteger(nominal) || nominal < 0) throw new Error("Nominal tidak valid.");
+
+            const updated = await updateCatalogProduct(id, {
+                kode: String(body.kode || "").trim(),
+                label: String(body.label || "").trim(),
+                kategoriId: String(body.kategoriId || "lainnya").trim(),
+                kategoriLabel: String(body.kategoriLabel || body.kategoriId || "Lainnya").trim(),
+                groupId: String(body.groupId || "lainnya").trim(),
+                operator: String(body.operator || "").trim(),
+                jenisProduk: String(body.jenisProduk || "").trim(),
+                nominal,
+                hargaJual: body.hargaJual !== "" && body.hargaJual != null ? Number(body.hargaJual) : null,
+                active: body.active !== false
+            });
+            if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan." });
+            await refreshInMemoryCatalog();
+            res.json({ product: publicProduct(updated) });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.delete("/api/admin/products/:id", requireAdmin, async (req, res) => {
+        try {
+            const id = Number(req.params.id);
+            if (!Number.isSafeInteger(id) || id < 1) throw new Error("ID tidak valid.");
+            const removed = await deleteCatalogProduct(id);
+            if (!removed) return res.status(404).json({ error: "Produk tidak ditemukan." });
+            await refreshInMemoryCatalog();
+            res.json({ ok: true });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    // =========================================
+    // ADMIN â Sinkronisasi Produk
+    // =========================================
+
+    // Ambil opsi dari API (untuk UI konfigurasi sync)
+    app.get("/api/admin/sync/options", requireAdmin, async (req, res) => {
+        try {
+            const options = await fetchCatalogOptions();
+            res.json(options);
         } catch (error) {
             res.status(400).json({ error: error.message });
         }
     });
 
-    registerDashboardRoutes(app);
+    // GET konfigurasi sinkronisasi yang tersimpan di DB
+    app.get("/api/admin/sync/config", requireAdmin, async (req, res) => {
+        try {
+            const config = await getSyncConfig();
+            res.json({ config });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    // Simpan konfigurasi sinkronisasi ke DB
+    app.post("/api/admin/sync/config", requireAdmin, async (req, res) => {
+        try {
+            const rules = req.body?.rules;
+            if (!Array.isArray(rules)) throw new Error("Format konfigurasi tidak valid.");
+            await saveSyncConfig(rules);
+            res.json({ ok: true, count: rules.length });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    // Jalankan sinkronisasi sesuai konfigurasi yang tersimpan
+    app.post("/api/admin/products/sync", requireAdmin, async (req, res) => {
+        try {
+            const syncConfig = await getSyncConfig();
+            if (syncConfig.length === 0) {
+                throw new Error("Belum ada konfigurasi sinkronisasi. Pilih kategori, operator, atau jenis produk terlebih dahulu.");
+            }
+            const products = await fetchCatalogFiltered(syncConfig);
+            const result = await replaceCatalogProducts(products);
+            await loadProductsFromDB();
+            res.json({
+                ...result,
+                rulesUsed: syncConfig.length,
+                message: `${result.imported} produk berhasil disinkronkan.`
+            });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    // =========================================
+    // ADMIN â Pengaturan (markup persen, dll.)
+    // =========================================
+
+    app.get("/api/admin/settings", requireAdmin, async (req, res) => {
+        try {
+            const markupPersen = await getMarkupPersen();
+            res.json({ markupPersen });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    app.post("/api/admin/settings", requireAdmin, async (req, res) => {
+        try {
+            const markupPersen = Number(req.body?.markupPersen);
+            if (isNaN(markupPersen) || markupPersen < 0 || markupPersen > 100) {
+                throw new Error("Markup persen harus antara 0 dan 100.");
+            }
+            await setAppSetting("markup_persen", markupPersen);
+            await reloadMarkup();
+            res.json({ ok: true, markupPersen });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
     registerWebhookRoutes(app);
 
     app.listen(PORT, "0.0.0.0", () => {
@@ -661,4 +710,4 @@ function startWebApp(bot) {
     return app;
 }
 
-module.exports = { registerDashboardRoutes, startWebApp };
+module.exports = { startWebApp };

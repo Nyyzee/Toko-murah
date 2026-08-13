@@ -1,13 +1,13 @@
 # Browser Digital Store
 
-Service ini sekarang berjalan sebagai aplikasi browser. Customer tidak lagi
-memesan lewat Telegram atau command bot.
+Service ini berjalan sebagai aplikasi browser. Customer mendaftar, login,
+memilih produk, melakukan order, dan mengajukan deposit dari halaman web.
 
 ## Alur customer
 
 1. Customer membuka URL hasil deploy.
 2. Customer mendaftar atau login dengan username dan password.
-3. Customer memilih grup, kategori, operator, jenis produk, dan varian.
+3. Customer memilih kategori, operator, jenis produk, dan nominal.
 4. Customer mengisi data tujuan lalu mengirim order.
 5. Harga dipotong dari saldo customer. Status transaksi diperbarui dari
    response/webhook provider.
@@ -15,23 +15,23 @@ memesan lewat Telegram atau command bot.
 
 ## Alur admin
 
-- Buka URL yang sama lalu pilih **Masuk sebagai admin**.
+- Buka URL yang sama lalu pilih **Login Admin**.
 - Masukkan `DASHBOARD_KEY`.
-- Lihat customer, saldo, deposit, transaksi, dan jumlah produk aktif.
-- Setujui atau tolak deposit dari dashboard.
-- Bot Telegram hanya mengirim notifikasi deposit ke grup admin dan menyediakan
-  tombol setujui/tolak. Tidak ada handler order atau command Telegram.
-- Tombol **Sinkronkan produk API** menghapus status aktif katalog lama lalu
-  memasukkan katalog terbaru ke PostgreSQL. Produk tidak disimpan hardcoded di
-  source.
+- Kelola customer, saldo, deposit, transaksi, dan produk dari dashboard.
+- Setujui atau tolak deposit dari dashboard atau tombol notifikasi Telegram.
+- Notifikasi deposit dikirim langsung ke `OWNER_CHAT_ID`.
+- Atur filter sinkronisasi melalui alur **Kategori → Operator → Jenis Produk**.
+- Konfigurasi sinkronisasi dan markup keuntungan disimpan di PostgreSQL.
+- Sistem tidak melakukan sinkronisasi otomatis sebelum admin menyimpan pilihan.
+- Saat sinkronisasi dijalankan, hanya produk yang sesuai pilihan yang disimpan
+  sebagai produk aktif.
 
 ## Variables saat deploy
 
 Wajib:
 
 - `BOT_TOKEN`
-- `OWNER_CHAT_ID` — Telegram user ID admin utama yang boleh menekan tombol deposit
-- `REKAP_GROUP_ID` — grup Telegram tujuan notifikasi deposit
+- `OWNER_CHAT_ID` — Telegram user/chat ID admin untuk notifikasi deposit
 - `DATABASE_URL`
 - `SESSION_SECRET` — nilai acak panjang untuk cookie login browser
 - `DASHBOARD_KEY`
@@ -48,13 +48,12 @@ Jika katalog akan diambil dari API lain, isi:
 - `PRODUCT_API_URL`
 - `PRODUCT_API_KEY` (opsional)
 
-Jika response API tidak memberikan harga jual, service memakai:
+Jika response API tidak memberikan harga jual, service memakai markup flat:
 
 - `DEFAULT_PRODUCT_MARKUP` (opsional, default `2500`)
 
-Isi semua contoh variable pada `.env.example` melalui Variables service.
-Tidak perlu menjalankan command Telegram, membuat produk manual, atau mengedit
-file setelah deploy.
+Markup persentase produk dapat diatur dari menu **Pengaturan** di dashboard
+admin dan disimpan di database.
 
 ## Provider webhook
 

@@ -1,7 +1,7 @@
 // =========================================
 // ENTRYPOINT
 // Browser menjadi satu-satunya tempat login dan order.
-// Telegram hanya dipakai untuk notifikasi deposit admin.
+// Telegram dipakai untuk notifikasi deposit ke admin (OWNER_CHAT_ID).
 // =========================================
 
 const TelegramBot = require("node-telegram-bot-api");
@@ -16,11 +16,10 @@ const {
 } = require("./db");
 const { startWebApp } = require("./dashboard");
 const { loadProductsFromDB } = require("./products");
-const { fetchCatalogProducts } = require("./tokovoucher");
-const { replaceCatalogProducts } = require("./db");
+const { fetchCatalogFiltered } = require("./tokovoucher");
+const { replaceCatalogProducts, getSyncConfig } = require("./db");
 
-// Telegram hanya dipakai untuk notifikasi deposit. Aplikasi browser tetap
-// dapat berjalan tanpa Telegram; persetujuan deposit tersedia di dashboard.
+// Telegram dipakai untuk notifikasi deposit admin.
 const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
 
 async function handleDepositCallback(query) {
@@ -48,13 +47,16 @@ async function handleDepositCallback(query) {
                 { chat_id: query.message.chat.id, message_id: query.message.message_id }
             ).catch(() => {});
         }
+
+        // Kirim konfirmasi hasil ke admin
+        const chatTarget = query.message?.chat?.id || OWNER_CHAT_ID;
         await bot.sendMessage(
-            query.message?.chat?.id || OWNER_CHAT_ID,
-            `Deposit ${result.status === "approved" ? "DITERIMA" : "DITOLAK"}\n` +
-            `Username: ${result.username}\n` +
-            `Nominal: Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
+            chatTarget,
+            `â Deposit ${result.status === "approved" ? "DITERIMA â" : "DITOLAK â"}\n` +
+            `ð¤ Customer: @${result.username}\n` +
+            `ð° Nominal: Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
             (result.status === "approved"
-                ? `Saldo sekarang: Rp${Number(result.saldo).toLocaleString("id-ID")}`
+                ? `ð³ Saldo sekarang: Rp${Number(result.saldo).toLocaleString("id-ID")}`
                 : "")
         );
     } catch (error) {
@@ -74,13 +76,22 @@ if (bot) {
     bot.on("polling_error", error => {
         console.error("[TELEGRAM]", error.message);
     });
+    console.log("[TELEGRAM] Bot aktif, notifikasi deposit akan dikirim ke admin.");
+} else {
+    console.warn("[TELEGRAM] BOT_TOKEN tidak diisi â notifikasi Telegram dinonaktifkan.");
 }
 
 async function syncCatalogAtStartup() {
     try {
-        const products = await fetchCatalogProducts();
+        const syncConfig = await getSyncConfig();
+        if (syncConfig.length === 0) {
+            console.log("[CATALOG] Sinkronisasi otomatis dilewati: belum ada pilihan kategori/operator/jenis produk.");
+            await loadProductsFromDB();
+            return;
+        }
+        const products = await fetchCatalogFiltered(syncConfig);
         const result = await replaceCatalogProducts(products);
-        console.log(`[CATALOG] ${result.imported} produk tersimpan dari API.`);
+        console.log(`[CATALOG] ${result.imported} produk tersimpan dari API (filter: ${syncConfig.length} aturan).`);
     } catch (error) {
         console.warn(`[CATALOG] Sinkronisasi dilewati: ${error.message}`);
     }
