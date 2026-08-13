@@ -38,6 +38,8 @@ const {
     getAppSetting,
     setAppSetting,
     getMarkupPersen,
+    getStoreProfile,
+    saveStoreProfile,
     getSyncConfig,
     saveSyncConfig,
     replaceCatalogProducts
@@ -249,16 +251,16 @@ function sendDepositNotification(bot, deposit, amount, username) {
         return;
     }
     const text =
-        "ð° DEPOSIT BARU MASUK\n" +
-        `ð¤ Customer: @${username || deposit.customer_id}\n` +
-        `ðµ Nominal: Rp${Number(amount).toLocaleString("id-ID")}\n` +
-        `ð Ref: ${deposit.request_ref}\n\n` +
+        "[DEPOSIT BARU] ð° DEPOSIT BARU MASUK\n" +
+        `[CUSTOMER] ð¤ @${username || deposit.customer_id}\n` +
+        `[NOMINAL] ðµ Rp${Number(amount).toLocaleString("id-ID")}\n` +
+        `[REF] ð ${deposit.request_ref}\n\n` +
         `Setujui atau tolak deposit ini:`;
     bot.sendMessage(OWNER_CHAT_ID, text, {
         reply_markup: {
             inline_keyboard: [[
-                { text: "â Setujui", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
-                { text: "â Tolak", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
+                { text: "SETUJUI â", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
+                { text: "TOLAK â", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
             ]]
         }
     }).catch(error => console.error("[TELEGRAM DEPOSIT]", error.message));
@@ -277,6 +279,7 @@ function startWebApp(bot) {
     app.get("/healthz", (req, res) => res.json({ ok: true }));
     app.get("/", (req, res) => res.type("html").send(dashboardHtml));
     app.get("/dashboard", (req, res) => res.type("html").send(dashboardHtml));
+    app.get("/admin", (req, res) => res.type("html").send(dashboardHtml));
 
     // =========================================
     // AUTH
@@ -337,6 +340,35 @@ function startWebApp(bot) {
         if (req.webSession?.id) webSessions.delete(req.webSession.id);
         clearWebCookie(req, res);
         res.json({ ok: true });
+    });
+
+    app.get("/api/public/profile", async (req, res) => {
+        try {
+            res.json({ profile: await getStoreProfile() });
+        } catch (error) {
+            res.status(400).json({ error: error.message });
+        }
+    });
+
+    app.get("/api/customer/profile", requireCustomer, async (req, res) => {
+        const customer = await getCustomerById(req.webSession.customerId);
+        res.json({ customer: customerPayload(customer) });
+    });
+
+    app.put("/api/customer/profile", requireCustomer, async (req, res) => {
+        try {
+            const data = {};
+            if (req.body?.username !== undefined) data.username = req.body.username;
+            if (req.body?.nama !== undefined) data.nama = req.body.nama;
+            if (req.body?.password) data.password = req.body.password;
+            const customer = await updateCustomer(req.webSession.customerId, data);
+            res.json({ customer: customerPayload(customer) });
+        } catch (error) {
+            const duplicate = /duplicate key|unique constraint/i.test(error.message || "");
+            res.status(duplicate ? 409 : 400).json({
+                error: duplicate ? "Username sudah digunakan." : error.message
+            });
+        }
     });
 
     // =========================================
@@ -682,7 +714,7 @@ function startWebApp(bot) {
     app.get("/api/admin/settings", requireAdmin, async (req, res) => {
         try {
             const markupPersen = await getMarkupPersen();
-            res.json({ markupPersen });
+            res.json({ markupPersen, profile: await getStoreProfile() });
         } catch (error) {
             res.status(400).json({ error: error.message });
         }
@@ -696,7 +728,8 @@ function startWebApp(bot) {
             }
             await setAppSetting("markup_persen", markupPersen);
             await reloadMarkup();
-            res.json({ ok: true, markupPersen });
+            const profile = await saveStoreProfile(req.body?.profile || {});
+            res.json({ ok: true, markupPersen, profile });
         } catch (error) {
             res.status(400).json({ error: error.message });
         }
