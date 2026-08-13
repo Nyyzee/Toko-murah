@@ -1,266 +1,422 @@
-const fs = require("fs");
+const express = require("express");
+const http = require("http");
+const crypto = require("crypto");
+const QRCode = require("qrcode");
 const path = require("path");
 
-const { DASHBOARD_KEY } = require("./config");
 const {
+    PORT,
+    SESSION_SECRET,
+    DASHBOARD_KEY,
+    DANA_QR_STRING,
+    REKAP_GROUP_ID,
+    OWNER_CHAT_ID
+} = require("./config");
+const {
+    authenticateCustomer,
+    createCustomer,
+    getCustomerById,
+    getAllCustomers,
+    createDepositRequest,
+    getCustomerDeposits,
+    getAdminDeposits,
+    decideDeposit,
+    createWebTransaction,
+    finishWebTransaction,
+    getCustomerTransactions,
+    getAdminTransactions,
     getCatalogProducts,
-    getNextCatalogNominal,
-    createCatalogProduct,
-    updateCatalogProduct,
-    deactivateCatalogProduct,
-    bulkUpdateCatalogProducts
+    getCatalogProductByCode,
+    replaceCatalogProducts,
+    getAdminSummary
 } = require("./db");
 const {
-    categories,
+    normalizeProduct,
     getSellingPrice,
+    getCatalogGroups,
     applyDatabaseCatalog
 } = require("./products");
+const { fetchCatalogProducts, topup } = require("./tokovoucher");
+const { generateDynamicQRIS } = require("./qris");
+const { registerWebhookRoutes } = require("./webhook");
 
-const dashboardHtml = fs.readFileSync(
+const dashboardHtml = require("fs").readFileSync(
     path.join(__dirname, "dashboard.html"),
     "utf8"
 );
 
-function authorized(req) {
-    const headerKey = req.get("x-dashboard-key");
-    const bearer = req.get("authorization");
-    const bearerKey = bearer && bearer.startsWith("Bearer ")
-        ? bearer.slice(7)
-        : "";
-    return Boolean(DASHBOARD_KEY && (headerKey === DASHBOARD_KEY || bearerKey === DASHBOARD_KEY));
+function parseCookies(req) {
+    const raw = req.headers.cookie || "";
+    return Object.fromEntries(raw.split(";").filter(Boolean).map(part => {
+        const index = part.indexOf("=");
+        return [
+            part.slice(0, index).trim(),
+            decodeURIComponent(part.slice(index + 1).trim())
+        ];
+    }));
 }
 
-function requireDashboardKey(req, res, next) {
-    if (!DASHBOARD_KEY) {
-        return res.status(503).json({
-            error: "DASHBOARD_KEY belum diatur di Variables service."
-        });
+function sign(value) {
+    return crypto.createHmac("sha256", SESSION_SECRET).update(value).digest("base64url");
+}
+
+function issueSession(res, payload) {
+    const body = Buffer.from(JSON.stringify({
+        ...payload,
+        exp: Date.now() + 1000 * 60 * 60 * 24 * 7
+    })).toString("base64url");
+    const token = `${body}.${sign(body)}`;
+    res.setHeader(
+        "Set-Cookie",
+        `web_session=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800`
+    );
+}
+
+function clearSession(res) {
+    res.setHeader("Set-Cookie", "web_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+}
+
+function readSession(req) {
+    const token = parseCookies(req).web_session;
+    if (!token) return null;
+    const [body, signature] = token.split(".");
+    const expected = body ? sign(body) : "";
+    if (!body || !signature ||
+        signature.length !== expected.length ||
+        !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
+    try {
+        const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+        return payload.exp > Date.now() ? payload : null;
+    } catch {
+        return null;
     }
-    if (!authorized(req)) {
-        return res.status(401).json({ error: "Kunci dashboard tidak benar." });
+}
+
+function requireCustomer(req, res, next) {
+    const session = readSession(req);
+    if (!session || session.role !== "customer" || !session.id) {
+        return res.status(401).json({ error: "Silakan login sebagai customer." });
     }
+    req.customerSession = session;
     next();
 }
 
-function categoryExists(id) {
-    return categories.some(category => category.id === id);
-}
-
-function parseProductPayload(body, allowAutoNominal = false) {
-    const label = String(body.label || "").trim();
-    const kode = String(body.kode || "").trim();
-    const kategoriId = String(body.kategoriId || "").trim();
-    const autoNominal = allowAutoNominal && body.autoNominal === true;
-    const nominal = autoNominal ? null : Number(body.nominal);
-    const hargaJual = body.hargaJual === "" || body.hargaJual === null ||
-        body.hargaJual === undefined
-        ? null
-        : Number(body.hargaJual);
-
-    if (label.length < 2 || label.length > 200) {
-        throw new Error("Nama produk harus 2 sampai 200 karakter.");
+function requireAdmin(req, res, next) {
+    const session = readSession(req);
+    if (!session || session.role !== "admin") {
+        return res.status(401).json({ error: "Silakan login sebagai admin." });
     }
-    if (!/^[a-zA-Z0-9._-]{2,120}$/.test(kode)) {
-        throw new Error("Kode produk hanya boleh berisi huruf, angka, titik, garis bawah, dan strip.");
-    }
-    if (!categoryExists(kategoriId)) {
-        throw new Error("Kategori produk tidak ditemukan.");
-    }
-    if (!autoNominal && (!Number.isSafeInteger(nominal) || nominal < 0)) {
-        throw new Error("Harga modal harus berupa angka bulat 0 atau lebih.");
-    }
-    if (hargaJual !== null && (!Number.isSafeInteger(hargaJual) || hargaJual < 0)) {
-        throw new Error("Harga jual harus berupa angka bulat 0 atau lebih.");
-    }
-
-    return {
-        label,
-        kode,
-        kategoriId,
-        nominal,
-        hargaJual,
-        metadata: {},
-        autoNominal,
-        nominalStep: Number(body.nominalStep || 1000)
-    };
-}
-
-function publicProduct(row) {
-    const category = categories.find(item => item.id === row.kategori_id);
-    const product = {
-        label: row.label,
-        kode: row.kode,
-        nominal: Number(row.nominal),
-        ...(row.harga_jual === null || row.harga_jual === undefined
-            ? {}
-            : { hargaJual: Number(row.harga_jual) }),
-        kategori: category
-    };
-    return {
-        id: row.id,
-        kode: row.kode,
-        label: row.label,
-        kategoriId: row.kategori_id,
-        kategoriLabel: category ? category.label : row.kategori_id,
-        nominal: Number(row.nominal),
-        hargaJual: row.harga_jual === null ? null : Number(row.harga_jual),
-        hargaJualEfektif: getSellingPrice(product),
-        active: row.active,
-        updatedAt: row.updated_at
-    };
-}
-
-async function refreshInMemoryCatalog() {
-    const rows = await getCatalogProducts(false);
-    applyDatabaseCatalog(rows);
+    req.adminSession = session;
+    next();
 }
 
 function sendError(res, error) {
-    const message = error && error.message ? error.message : "Terjadi kesalahan.";
-    const duplicate = /duplicate key|unique constraint/i.test(message);
-    return res.status(duplicate ? 409 : 400).json({
-        error: duplicate ? "Kode produk sudah digunakan." : message
-    });
+    const message = error?.message || "Terjadi kesalahan server.";
+    const status = /tidak cukup|tidak ditemukan|harus|invalid|belum diisi|minimal/i.test(message)
+        ? 400
+        : 500;
+    res.status(status).json({ error: message });
 }
 
-function parseBulkPayload(body) {
-    const kategoriId = String(body.kategoriId || "").trim();
-    const namaContains = String(body.namaContains || "").trim();
-    const nominalStart = body.nominalStart === "" || body.nominalStart === null ||
-        body.nominalStart === undefined ? null : Number(body.nominalStart);
-    const nominalStep = body.nominalStep === "" || body.nominalStep === null ||
-        body.nominalStep === undefined ? null : Number(body.nominalStep);
-    const hargaJualMode = String(body.hargaJualMode || "keep");
-    const hargaJual = body.hargaJual === "" || body.hargaJual === null ||
-        body.hargaJual === undefined ? null : Number(body.hargaJual);
-
-    if (!kategoriId && !namaContains) {
-        throw new Error("Pilih kategori atau isi nama produk sebagai sasaran edit massal.");
-    }
-    if (kategoriId && !categoryExists(kategoriId)) {
-        throw new Error("Kategori produk tidak ditemukan.");
-    }
-    if (namaContains.length > 200) {
-        throw new Error("Pencarian nama terlalu panjang.");
-    }
-    if (nominalStart !== null && (!Number.isSafeInteger(nominalStart) || nominalStart < 0)) {
-        throw new Error("Nominal awal harus berupa angka bulat 0 atau lebih.");
-    }
-    if (nominalStep !== null && (!Number.isSafeInteger(nominalStep) || nominalStep < 1)) {
-        throw new Error("Jarak nominal minimal 1.");
-    }
-    if ((nominalStart === null) !== (nominalStep === null)) {
-        throw new Error("Nominal awal dan jarak nominal harus diisi bersama.");
-    }
-    if (!["keep", "set", "clear"].includes(hargaJualMode)) {
-        throw new Error("Mode harga jual tidak valid.");
-    }
-    if (hargaJualMode === "set" &&
-        (!Number.isSafeInteger(hargaJual) || hargaJual < 0)) {
-        throw new Error("Harga jual massal harus berupa angka bulat 0 atau lebih.");
-    }
-
-    if (nominalStart === null && hargaJualMode === "keep") {
-        throw new Error("Isi perubahan nominal atau harga jual terlebih dahulu.");
-    }
-
+function publicCatalog(rows) {
+    const products = rows.map(normalizeProduct);
     return {
-        kategoriId,
-        namaContains,
-        nominalStart,
-        nominalStep,
-        hargaJualMode,
-        hargaJual
+        groups: getCatalogGroups(products),
+        products: products.map(product => ({
+            id: product.id,
+            kode: product.kode,
+            label: product.label,
+            nominal: product.nominal,
+            hargaJual: product.hargaJualEfektif,
+            groupId: product.groupId,
+            groupLabel: product.groupLabel,
+            kategoriId: product.kategoriId,
+            kategoriLabel: product.kategoriLabel,
+            operator: product.operator,
+            jenisProduk: product.jenisProduk
+        }))
     };
 }
 
-function registerDashboardRoutes(app) {
-    app.get(["/dashboard", "/dashboard/"], (req, res) => {
+function providerResultStatus(response) {
+    const status = String(response?.status || response?.data?.status || "").toLowerCase();
+    if (["sukses", "success", "berhasil", "selesai", "1"].includes(status)) return "success";
+    if (["gagal", "failed", "error", "0"].includes(status)) return "failed";
+    return "processing";
+}
+
+function amountValue(value) {
+    const amount = Number(String(value).replace(/[^\d]/g, ""));
+    if (!Number.isSafeInteger(amount)) return null;
+    return amount;
+}
+
+async function notifyDeposit(bot, deposit, customer) {
+    if (!bot) return;
+    const target = REKAP_GROUP_ID || OWNER_CHAT_ID;
+    if (!target) return;
+    const text = [
+        "DEPOSIT BARU",
+        `Username: ${customer.username}`,
+        `Nominal: Rp${Number(deposit.amount).toLocaleString("id-ID")}`,
+        `Referensi: ${deposit.request_ref}`,
+        "Pilih tindakan:"
+    ].join("\n");
+    try {
+        await bot.sendMessage(target, text, {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "Setujui", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
+                    { text: "Tolak", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
+                ]]
+            }
+        });
+    } catch (error) {
+        console.error("[DEPOSIT NOTIFICATION]", error.message);
+    }
+}
+
+function registerDashboardRoutes(app, bot) {
+    app.get(["/", "/dashboard", "/dashboard/"], (req, res) => {
         res.type("html").send(dashboardHtml);
     });
 
-    app.get("/api/dashboard/categories", requireDashboardKey, (req, res) => {
-        res.json(categories.map(category => ({
-            id: category.id,
-            label: category.label
-        })));
+    app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+    app.post("/api/auth/register", async (req, res) => {
+        try {
+            const customer = await createCustomer(req.body?.username, req.body?.password);
+            issueSession(res, { role: "customer", id: customer.id, username: customer.username });
+            res.status(201).json({ customer });
+        } catch (error) {
+            if (error.code === "23505") return res.status(409).json({ error: "Username sudah digunakan." });
+            sendError(res, error);
+        }
     });
 
-    app.get("/api/dashboard/products", requireDashboardKey, async (req, res) => {
+    app.post("/api/auth/login", async (req, res) => {
         try {
-            const rows = await getCatalogProducts(true);
-            res.json(rows.map(publicProduct));
+            const customer = await authenticateCustomer(req.body?.username, req.body?.password);
+            if (!customer) return res.status(401).json({ error: "Username atau password salah." });
+            issueSession(res, { role: "customer", id: customer.id, username: customer.username });
+            res.json({ customer });
         } catch (error) {
             sendError(res, error);
         }
     });
 
-    app.post("/api/dashboard/products", requireDashboardKey, async (req, res) => {
+    app.post("/api/auth/logout", (req, res) => {
+        clearSession(res);
+        res.json({ ok: true });
+    });
+
+    app.get("/api/auth/me", async (req, res) => {
+        const session = readSession(req);
+        if (!session) return res.json({ authenticated: false });
+        if (session.role === "admin") return res.json({ authenticated: true, role: "admin" });
+        const customer = await getCustomerById(session.id);
+        if (!customer) return res.json({ authenticated: false });
+        res.json({ authenticated: true, role: "customer", customer });
+    });
+
+    app.get("/api/catalog", async (req, res) => {
         try {
-            const product = parseProductPayload(req.body || {}, true);
-            if (product.autoNominal) {
-                if (!Number.isSafeInteger(product.nominalStep) || product.nominalStep < 1) {
-                    throw new Error("Jarak nominal minimal 1.");
-                }
-                product.nominal = await getNextCatalogNominal(
-                    product.kategoriId,
-                    product.nominalStep
-                );
+            const rows = await getCatalogProducts(false);
+            applyDatabaseCatalog(rows);
+            res.json(publicCatalog(rows));
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.get("/api/customer/deposits", requireCustomer, async (req, res) => {
+        try {
+            res.json({ deposits: await getCustomerDeposits(req.customerSession.id) });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/customer/deposits", requireCustomer, async (req, res) => {
+        try {
+            const amount = amountValue(req.body?.amount);
+            if (!amount || amount < 10000) {
+                throw new Error("Minimal deposit adalah Rp10.000.");
             }
-            const created = await createCatalogProduct(product);
-            await refreshInMemoryCatalog();
-            res.status(201).json(publicProduct(created));
-        } catch (error) {
-            sendError(res, error);
-        }
-    });
-
-    app.put("/api/dashboard/products/bulk", requireDashboardKey, async (req, res) => {
-        try {
-            const bulk = parseBulkPayload(req.body || {});
-            const result = await bulkUpdateCatalogProducts(bulk);
-            await refreshInMemoryCatalog();
-            res.json({
-                ok: true,
-                updatedCount: result.updatedCount,
-                message: `${result.updatedCount} produk berhasil diperbarui.`
+            const requestRef = `DEP-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+            const deposit = await createDepositRequest(req.customerSession.id, amount, requestRef);
+            const qris = generateDynamicQRIS(DANA_QR_STRING, amount);
+            const qrDataUrl = await QRCode.toDataURL(qris, { width: 360, margin: 2 });
+            const customer = await getCustomerById(req.customerSession.id);
+            await notifyDeposit(bot, deposit, customer);
+            res.status(201).json({
+                deposit: {
+                    id: Number(deposit.id),
+                    amount,
+                    requestRef,
+                    status: deposit.status,
+                    qrDataUrl
+                }
             });
         } catch (error) {
             sendError(res, error);
         }
     });
 
-    app.put("/api/dashboard/products/:id", requireDashboardKey, async (req, res) => {
+    app.get("/api/customer/transactions", requireCustomer, async (req, res) => {
         try {
-            const id = Number(req.params.id);
-            if (!Number.isSafeInteger(id) || id < 1) {
-                throw new Error("ID produk tidak valid.");
-            }
-            const product = parseProductPayload(req.body || {});
-            product.active = req.body.active !== false;
-            const updated = await updateCatalogProduct(id, product);
-            if (!updated) return res.status(404).json({ error: "Produk tidak ditemukan." });
-            await refreshInMemoryCatalog();
-            res.json(publicProduct(updated));
+            res.json({ transactions: await getCustomerTransactions(req.customerSession.id) });
         } catch (error) {
             sendError(res, error);
         }
     });
 
-    app.delete("/api/dashboard/products/:id", requireDashboardKey, async (req, res) => {
+    app.post("/api/customer/orders", requireCustomer, async (req, res) => {
+        let order;
         try {
-            const id = Number(req.params.id);
-            if (!Number.isSafeInteger(id) || id < 1) {
-                throw new Error("ID produk tidak valid.");
+            const code = String(req.body?.kode || "").trim();
+            const targetData = req.body?.targetData;
+            if (!code || !targetData || typeof targetData !== "object") {
+                throw new Error("Produk dan data tujuan wajib diisi.");
             }
-            const removed = await deactivateCatalogProduct(id);
-            if (!removed) return res.status(404).json({ error: "Produk tidak ditemukan." });
-            await refreshInMemoryCatalog();
-            res.json({ ok: true });
+            const targetText = Object.values(targetData).join(" ").trim();
+            if (!targetText || targetText.length > 300) {
+                throw new Error("Data tujuan tidak valid.");
+            }
+            const rawProduct = await getCatalogProductByCode(code);
+            if (!rawProduct) throw new Error("Produk tidak tersedia.");
+            const product = normalizeProduct(rawProduct);
+            const requestRef = `WEB-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+            order = await createWebTransaction({
+                customerId: req.customerSession.id,
+                requestRef,
+                productCode: product.kode,
+                productLabel: product.label,
+                kategoriId: product.kategoriId,
+                kategoriLabel: product.kategoriLabel,
+                operator: product.operator,
+                jenisProduk: product.jenisProduk,
+                targetData,
+                amount: getSellingPrice(product)
+            });
+
+            const response = await topup({
+                refId: requestRef,
+                tujuan: targetText,
+                kode: product.kode
+            });
+            const status = providerResultStatus(response);
+            if (status !== "processing") {
+                await finishWebTransaction(
+                    requestRef,
+                    status,
+                    response?.ref_id || response?.data?.ref_id || null,
+                    response
+                );
+            }
+            const transactions = await getCustomerTransactions(req.customerSession.id);
+            const current = transactions.find(item => item.requestRef === requestRef);
+            const customer = await getCustomerById(req.customerSession.id);
+            res.status(201).json({ transaction: current, customer });
+        } catch (error) {
+            if (order && order.request_ref) {
+                await finishWebTransaction(order.request_ref, "failed", null, {
+                    error: error.message
+                }).catch(() => {});
+            }
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/admin/login", (req, res) => {
+        if (!DASHBOARD_KEY || req.body?.key !== DASHBOARD_KEY) {
+            return res.status(401).json({ error: "Kunci admin salah." });
+        }
+        issueSession(res, { role: "admin" });
+        res.json({ ok: true });
+    });
+
+    app.get("/api/admin/summary", requireAdmin, async (req, res) => {
+        try {
+            res.json(await getAdminSummary());
         } catch (error) {
             sendError(res, error);
         }
     });
+
+    app.get("/api/admin/customers", requireAdmin, async (req, res) => {
+        try {
+            res.json({ customers: await getAllCustomers() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.get("/api/admin/deposits", requireAdmin, async (req, res) => {
+        try {
+            res.json({ deposits: await getAdminDeposits() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/admin/deposits/:id/decision", requireAdmin, async (req, res) => {
+        try {
+            const result = await decideDeposit(
+                Number(req.params.id),
+                req.body?.status,
+                req.body?.note
+            );
+            res.json({
+                deposit: {
+                    id: Number(result.id),
+                    amount: Number(result.amount),
+                    status: result.status,
+                    username: result.username,
+                    saldo: result.saldo
+                }
+            });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.get("/api/admin/transactions", requireAdmin, async (req, res) => {
+        try {
+            res.json({ transactions: await getAdminTransactions() });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    app.post("/api/admin/products/sync", requireAdmin, async (req, res) => {
+        try {
+            const products = await fetchCatalogProducts();
+            const result = await replaceCatalogProducts(products);
+            res.json({ ...result, products: products.length });
+        } catch (error) {
+            sendError(res, error);
+        }
+    });
+
+    registerWebhookRoutes(app, bot);
 }
 
-module.exports = { registerDashboardRoutes };
+function startWebApp(bot) {
+    const app = express();
+    app.disable("x-powered-by");
+    app.use(express.json({ limit: "1mb" }));
+    app.use(express.urlencoded({ extended: false }));
+    registerDashboardRoutes(app, bot);
+    const server = http.createServer(app);
+    server.listen(PORT, "0.0.0.0", () => {
+        console.log(`[WEB] Browser app berjalan di port ${PORT}.`);
+    });
+    return { app, server };
+}
+
+module.exports = {
+    registerDashboardRoutes,
+    startWebApp,
+    readSession
+};
