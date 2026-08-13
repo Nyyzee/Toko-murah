@@ -229,6 +229,21 @@ async function updateCustomer(id, data) {
         fields.push(`password = $${idx++}`);
         values.push(String(data.password));
     }
+    if (data.username !== undefined && data.username !== null) {
+        const username = normalizeUsername(data.username);
+        if (!/^[a-z0-9._-]{3,100}$/.test(username)) {
+            throw new Error("Username harus 3-100 karakter dan hanya boleh berisi huruf, angka, titik, garis bawah, atau strip.");
+        }
+        fields.push(`username = $${idx++}`);
+        values.push(username);
+        fields.push(`nama = $${idx++}`);
+        values.push(String(data.nama || username).trim().slice(0, 100));
+    } else if (data.nama !== undefined && data.nama !== null) {
+        const nama = String(data.nama).trim().slice(0, 100);
+        if (!nama) throw new Error("Nama tidak boleh kosong.");
+        fields.push(`nama = $${idx++}`);
+        values.push(nama);
+    }
     if (data.saldo !== undefined && data.saldo !== null) {
         const saldo = Number(data.saldo);
         if (!Number.isSafeInteger(saldo) || saldo < 0) throw new Error("Saldo tidak valid.");
@@ -712,6 +727,32 @@ async function getMarkupPersen() {
     return val !== null ? Number(val) : 0;
 }
 
+const PROFILE_SETTING_KEYS = ["store_name", "store_tagline", "store_contact"];
+
+async function getStoreProfile() {
+    const values = await Promise.all(
+        PROFILE_SETTING_KEYS.map(key => getAppSetting(key))
+    );
+    return {
+        name: values[0] || "Toko Murah",
+        tagline: values[1] || "Beli pulsa, paket data, e-wallet & produk digital",
+        contact: values[2] || ""
+    };
+}
+
+async function saveStoreProfile(profile = {}) {
+    const name = String(profile.name || "").trim().slice(0, 80);
+    const tagline = String(profile.tagline || "").trim().slice(0, 160);
+    const contact = String(profile.contact || "").trim().slice(0, 160);
+    if (!name) throw new Error("Nama toko tidak boleh kosong.");
+    await Promise.all([
+        setAppSetting("store_name", name),
+        setAppSetting("store_tagline", tagline),
+        setAppSetting("store_contact", contact)
+    ]);
+    return { name, tagline, contact };
+}
+
 // =========================================
 // SYNC CONFIG
 // =========================================
@@ -806,6 +847,8 @@ module.exports = {
     getAppSetting,
     setAppSetting,
     getMarkupPersen,
+    getStoreProfile,
+    saveStoreProfile,
     getSyncConfig,
     saveSyncConfig,
     getAdminSummary

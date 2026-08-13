@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TokoVoucher — Beli Pulsa, Data & E-Wallet Murah</title>
+  <title>Toko Murah — Beli Pulsa, Data & E-Wallet Murah</title>
   <style>
     :root {
       --brand:#1a56db; --dark:#1e40af; --soft:#eff6ff; --ink:#111827;
@@ -198,14 +198,14 @@
 <div id="authView" class="hidden">
   <div class="auth-box">
     <nav class="navbar" style="border-radius:0;position:relative">
-      <div class="navbar-brand">🛒 <span>TokoVoucher</span></div>
+      <div class="navbar-brand">🛒 <span data-brand-name>Toko Murah</span></div>
     </nav>
     <div style="display:flex;align-items:center;justify-content:center;min-height:calc(100vh - 56px);padding:16px">
       <div class="auth-card" style="width:min(420px,100%)">
         <div class="auth-header">
           <div class="auth-logo">🛒</div>
-          <div class="auth-title">TokoVoucher</div>
-          <div class="auth-sub">Beli pulsa, paket data, e-wallet & produk digital</div>
+          <div class="auth-title" id="authTitle" data-brand-name>Toko Murah</div>
+          <div class="auth-sub" id="authSub" data-brand-tagline>Beli pulsa, paket data, e-wallet & produk digital</div>
         </div>
         <div class="auth-tabs">
           <button id="loginTab" class="active" type="button">Masuk</button>
@@ -219,7 +219,7 @@
             <div id="authMessage" class="msg"></div>
           </form>
           <hr class="auth-sep">
-          <div class="auth-admin-btn"><button id="adminOpen" class="btn btn-ghost" type="button">🔐 Login Admin</button></div>
+          <div class="auth-admin-btn hidden" id="adminAccess"><button id="adminOpen" class="btn btn-ghost" type="button">🔐 Login Admin</button></div>
         </div>
       </div>
     </div>
@@ -231,10 +231,11 @@
 <!-- ──────────────────────────────────────────── -->
 <div id="customerView" class="hidden">
   <nav class="navbar">
-    <div class="navbar-brand">🛒 <span>TokoVoucher</span></div>
+    <div class="navbar-brand">🛒 <span data-brand-name>Toko Murah</span></div>
     <div class="navbar-right">
       <span id="navBalance" class="nav-balance">Rp 0</span>
       <span id="navUser" class="nav-user"></span>
+      <button id="customerProfile" class="btn btn-ghost btn-sm" type="button">👤 Profil</button>
       <button id="customerLogout" class="btn btn-ghost btn-sm" type="button">Keluar</button>
     </div>
   </nav>
@@ -395,7 +396,7 @@
       </div>
       <div class="panel-body" style="padding:16px 20px">
         <div class="alert alert-info" style="margin-bottom:16px">
-          Pilih Kategori, Operator, dan Jenis Produk yang ingin disinkronkan. Produk di luar pilihan tidak akan diambil atau ditampilkan.
+          Pilih kategori, operator, dan jenis produk yang ingin disinkronkan. Jika API hanya mengirim ID kategori, sistem menampilkan contoh nama produk agar pilihannya tetap mudah dikenali.
         </div>
         <div id="syncMsg" class="msg" style="margin-bottom:10px"></div>
         <div class="sync-flow" id="syncFlow" style="display:none">
@@ -425,6 +426,21 @@
       <div class="admin-section-head"><h3>⚙️ Pengaturan Toko</h3></div>
       <div class="panel-body">
         <div class="settings-card">
+          <h4 style="margin-bottom:8px">Profil Toko / Admin</h4>
+          <p class="settings-desc">Profil ini tampil di halaman customer. Login admin tetap menggunakan <code>DASHBOARD_KEY</code> dari Variables.</p>
+          <div class="field">
+            <label>Nama Toko</label>
+            <input id="storeNameInput" maxlength="80" placeholder="Toko Murah">
+          </div>
+          <div class="field">
+            <label>Slogan / Keterangan</label>
+            <input id="storeTaglineInput" maxlength="160" placeholder="Beli pulsa, paket data, e-wallet & produk digital">
+          </div>
+          <div class="field">
+            <label>Kontak Admin (opsional)</label>
+            <input id="storeContactInput" maxlength="160" placeholder="WhatsApp atau Telegram">
+          </div>
+          <hr style="border:0;border-top:1px solid var(--line);margin:20px 0">
           <h4 style="margin-bottom:8px">Keuntungan Produk (%)</h4>
           <p class="settings-desc">Persentase keuntungan yang ditambahkan di atas harga modal untuk semua produk. Contoh: 5 = harga jual 105% dari harga modal. Isi 0 untuk memakai markup flat bawaan.</p>
           <form id="settingsForm">
@@ -432,11 +448,30 @@
               <label>Markup Keuntungan (%)</label>
               <input id="markupInput" type="number" min="0" max="100" step="0.1" placeholder="Contoh: 5" value="0">
             </div>
-            <button class="btn btn-primary" type="submit">Simpan Pengaturan</button>
+            <button class="btn btn-primary" type="submit">Simpan Profil & Pengaturan</button>
             <div id="settingsMsg" class="msg" style="margin-top:10px"></div>
           </form>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Profil Customer -->
+<div id="modalProfile" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-head"><h3>👤 Profil Customer</h3><button class="modal-close" onclick="closeModal('modalProfile')">✕</button></div>
+    <div class="modal-body">
+      <div id="profileMsg" class="msg" style="margin-bottom:10px"></div>
+      <form id="profileForm">
+        <div class="field"><label>Username</label><input id="profileUsername" required minlength="3" maxlength="100" autocomplete="username"></div>
+        <div class="field"><label>Nama Tampilan</label><input id="profileNama" maxlength="100" placeholder="Nama Anda"></div>
+        <div class="field"><label>Password Baru (opsional)</label><input id="profilePassword" type="password" minlength="6" autocomplete="new-password" placeholder="Kosongkan jika tidak diganti"></div>
+      </form>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modalProfile')">Batal</button>
+      <button class="btn btn-primary" id="saveProfile" type="button">Simpan Profil</button>
     </div>
   </div>
 </div>
@@ -553,6 +588,15 @@ function msg(id, text, type = 'ok') { const el=$(id); el.textContent=text; el.cl
 function showView(id) { ['authView','customerView','adminView'].forEach(v=>$(v).classList.toggle('hidden',v!==id)); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 
+async function loadPublicProfile() {
+  try {
+    const { profile } = await api('/api/public/profile');
+    document.title = `${profile.name} — Beli Pulsa, Data & E-Wallet Murah`;
+    document.querySelectorAll('[data-brand-name]').forEach(el => el.textContent = profile.name);
+    document.querySelectorAll('[data-brand-tagline]').forEach(el => el.textContent = profile.tagline);
+  } catch (_) {}
+}
+
 // ── AUTH ──────────────────────────────────
 function switchAuth(mode) {
   state.authMode = mode;
@@ -582,6 +626,32 @@ $('adminOpen').onclick = async () => {
   if (!key) return;
   try { await api('/api/admin/login', { method:'POST', body:JSON.stringify({key}) }); showAdmin(); }
   catch(err) { msg('authMessage', err.message, 'err'); }
+};
+
+$('customerProfile').onclick = () => {
+  $('profileUsername').value = state.customer?.username || '';
+  $('profileNama').value = state.customer?.nama || '';
+  $('profilePassword').value = '';
+  msg('profileMsg','');
+  $('modalProfile').classList.remove('hidden');
+};
+
+$('saveProfile').onclick = async () => {
+  try {
+    const res = await api('/api/customer/profile', {
+      method: 'PUT',
+      body: JSON.stringify({
+        username: $('profileUsername').value,
+        nama: $('profileNama').value,
+        password: $('profilePassword').value
+      })
+    });
+    state.customer = res.customer;
+    updateNavBalance();
+    msg('profileMsg', 'Profil berhasil disimpan.');
+    $('profilePassword').value = '';
+    setTimeout(() => closeModal('modalProfile'), 700);
+  } catch (err) { msg('profileMsg', err.message, 'err'); }
 };
 
 $('customerLogout').onclick = async () => { await api('/api/auth/logout',{method:'POST'}).catch(()=>{}); location.reload(); };
@@ -1066,7 +1136,7 @@ function renderSyncOptions() {
   $('syncCategories').innerHTML = categories.map(c =>
     `<div class="check-item">
       <input type="checkbox" id="cat_${esc(c.id)}" value="${esc(c.id)}" data-label="${esc(c.label)}" class="sync-cat-cb">
-      <label for="cat_${esc(c.id)}">${esc(c.label)}</label>
+      <label for="cat_${esc(c.id)}">${esc(c.displayLabel || c.label || `Kategori ${c.id}`)}</label>
     </div>`
   ).join('') || '<span style="font-size:12px;color:var(--muted);padding:8px">Tidak ada kategori</span>';
 
@@ -1162,6 +1232,9 @@ async function loadSettings() {
   try {
     const d = await api('/api/admin/settings');
     $('markupInput').value = d.markupPersen || 0;
+    $('storeNameInput').value = d.profile?.name || 'Toko Murah';
+    $('storeTaglineInput').value = d.profile?.tagline || '';
+    $('storeContactInput').value = d.profile?.contact || '';
   } catch(err) {}
 }
 
@@ -1169,7 +1242,20 @@ $('settingsForm').onsubmit = async e => {
   e.preventDefault();
   msg('settingsMsg','Menyimpan...');
   try {
-    const res = await api('/api/admin/settings', { method:'POST', body:JSON.stringify({markupPersen:Number($('markupInput').value)}) });
+    const res = await api('/api/admin/settings', {
+      method:'POST',
+      body:JSON.stringify({
+        markupPersen:Number($('markupInput').value),
+        profile: {
+          name: $('storeNameInput').value,
+          tagline: $('storeTaglineInput').value,
+          contact: $('storeContactInput').value
+        }
+      })
+    });
+    document.querySelectorAll('[data-brand-name]').forEach(el => el.textContent = res.profile.name);
+    document.querySelectorAll('[data-brand-tagline]').forEach(el => el.textContent = res.profile.tagline);
+    document.title = `${res.profile.name} — Beli Pulsa, Data & E-Wallet Murah`;
     msg('settingsMsg', `✅ Markup ${res.markupPersen}% berhasil disimpan. Harga produk diperbarui.`);
   } catch(err) { msg('settingsMsg', err.message, 'err'); }
 };
@@ -1177,6 +1263,12 @@ $('settingsForm').onsubmit = async e => {
 // ── BOOT ────────────────────────────────────
 
 async function boot() {
+  await loadPublicProfile();
+  if (location.pathname.replace(/\/+$/, '') === '/admin') {
+    $('adminAccess').classList.remove('hidden');
+    $('authTitle').textContent = 'Login Admin';
+    $('authSub').textContent = 'Masukkan kunci admin untuk membuka dashboard';
+  }
   try {
     const s = await api('/api/auth/me');
     if (s.authenticated && s.role === 'admin') return showAdmin();

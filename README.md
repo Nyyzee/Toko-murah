@@ -16,15 +16,33 @@ memilih produk, melakukan order, dan mengajukan deposit dari halaman web.
 ## Alur admin
 
 - Buka URL yang sama lalu pilih **Login Admin**.
+- Akses admin melalui URL khusus: `https://URL-DEPLOY-ANDA/admin`.
+- Tombol login admin tidak ditampilkan di halaman customer utama (`/`).
 - Masukkan `DASHBOARD_KEY`.
 - Kelola customer, saldo, deposit, transaksi, dan produk dari dashboard.
 - Setujui atau tolak deposit dari dashboard atau tombol notifikasi Telegram.
 - Notifikasi deposit dikirim langsung ke `OWNER_CHAT_ID`.
 - Atur filter sinkronisasi melalui alur **Kategori → Operator → Jenis Produk**.
 - Konfigurasi sinkronisasi dan markup keuntungan disimpan di PostgreSQL.
+- Profil toko dapat diubah dari **Admin → Pengaturan**. Login admin tetap memakai
+  `DASHBOARD_KEY`.
+- Customer dapat mengubah username, nama tampilan, dan password dari tombol
+  **Profil** setelah login.
 - Sistem tidak melakukan sinkronisasi otomatis sebelum admin menyimpan pilihan.
 - Saat sinkronisasi dijalankan, hanya produk yang sesuai pilihan yang disimpan
   sebagai produk aktif.
+
+## Command Telegram
+
+Command hanya merespons `OWNER_CHAT_ID`:
+
+- `/start` atau `/help` — menampilkan bantuan bot.
+- `/status` — menampilkan jumlah customer, produk aktif, transaksi, dan deposit
+  yang masih pending.
+
+Notifikasi deposit juga tetap memiliki tombol `SETUJUI` dan `TOLAK`. Label teks
+ditampilkan bersama emoji agar tetap terbaca pada client Telegram yang tidak
+merender emoji.
 
 ## Variables saat deploy
 
