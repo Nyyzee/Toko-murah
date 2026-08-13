@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Toko pulsa, paket data, e-wallet, dan produk digital.">
+  <title>Toko Digital</title>
+  <style>
+    :root { --ink:#14251f; --muted:#6b7b74; --paper:#f3f7f4; --panel:#fff; --line:#dbe8e0; --brand:#087653; --dark:#04563d; --soft:#e4f4ec; --danger:#b83c45; --warn:#9a6814; --shadow:0 18px 50px rgba(17,67,48,.09); }
+    * { box-sizing:border-box; }
+    body { margin:0; color:var(--ink); background:radial-gradient(circle at 100% 0,#d7f1e5 0,transparent 34rem),var(--paper); font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button,input,select { font:inherit; }
+    button { cursor:pointer; border:0; border-radius:11px; padding:11px 15px; font-weight:750; }
+    button:disabled { opacity:.55; cursor:wait; }
+    input,select { width:100%; border:1px solid #cddcd3; border-radius:11px; background:#fcfefd; color:var(--ink); padding:11px 12px; outline:0; }
+    input:focus,select:focus { border-color:var(--brand); box-shadow:0 0 0 3px #0876531a; }
+    .primary { color:white; background:var(--brand); } .primary:hover { background:var(--dark); }
+    .secondary { color:var(--dark); background:var(--soft); } .ghost { color:var(--muted); background:transparent; } .danger { color:var(--danger); background:#ffedef; }
+    .hidden { display:none!important; } .shell { width:min(1180px,calc(100% - 28px)); margin:auto; padding:26px 0 54px; }
+    .eyebrow { color:var(--brand); letter-spacing:.11em; text-transform:uppercase; font-size:11px; font-weight:850; }
+    h1,h2,h3,p { margin-top:0; } h1 { margin-bottom:7px; font-size:clamp(29px,5vw,48px); line-height:1; letter-spacing:-.05em; } h2 { font-size:18px; margin-bottom:4px; } h3 { font-size:15px; }
+    .muted,.hint { color:var(--muted); } .hint { font-size:12px; margin-bottom:0; }
+    .panel { background:rgba(255,255,255,.93); border:1px solid var(--line); border-radius:20px; box-shadow:var(--shadow); }
+    .panel-head { padding:20px 22px 13px; border-bottom:1px solid var(--line); } .panel-body { padding:20px 22px; }
+    .auth { width:min(470px,calc(100% - 28px)); margin:9vh auto 0; } .auth .panel-body { padding:25px; }
+    .auth-tabs { display:flex; gap:8px; margin-bottom:18px; } .auth-tabs button { flex:1; }
+    .field { margin-bottom:14px; } label { display:block; margin-bottom:6px; font-size:12px; font-weight:800; }
+    .message { min-height:23px; margin-top:12px; font-size:13px; } .message.error { color:var(--danger); } .message.ok { color:var(--dark); }
+    .topbar { display:flex; justify-content:space-between; align-items:end; gap:18px; margin-bottom:24px; } .top-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end; }
+    .balance { color:var(--dark); background:var(--soft); border-radius:999px; padding:9px 13px; font-weight:800; font-size:13px; }
+    .intro { max-width:600px; color:var(--muted); margin-bottom:0; } .layout { display:grid; grid-template-columns:1.3fr .7fr; gap:20px; align-items:start; }
+    .tabs { display:flex; gap:7px; overflow:auto; padding:14px 18px; border-bottom:1px solid var(--line); } .tabs button { white-space:nowrap; padding:9px 12px; }
+    .tabs button.active { color:var(--dark); background:var(--soft); }
+    .filters { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; padding:16px 20px; background:#f8fcfa; border-bottom:1px solid var(--line); }
+    .products { display:grid; grid-template-columns:repeat(auto-fill,minmax(205px,1fr)); gap:11px; padding:18px 20px; max-height:590px; overflow:auto; }
+    .product { display:block; text-align:left; background:#fff; border:1px solid var(--line); border-radius:15px; padding:14px; transition:.16s; }
+    .product:hover,.product.selected { border-color:var(--brand); box-shadow:0 7px 20px #08765318; transform:translateY(-1px); }
+    .product .name { font-weight:800; min-height:42px; } .product .meta { color:var(--muted); font-size:11px; margin-top:7px; } .product .price { color:var(--dark); font-weight:850; margin-top:11px; }
+    .order-panel .panel-body { position:sticky; top:15px; } .selected-product { background:#f5fbf8; border:1px solid var(--line); border-radius:13px; padding:13px; margin-bottom:17px; }
+    .selected-product strong { display:block; margin-bottom:4px; } .target-fields { margin-bottom:5px; }
+    .section { margin-top:20px; } .qr { display:block; width:min(100%,300px); margin:12px auto; border:8px solid #fff; box-shadow:0 4px 18px #173c2a1c; }
+    .status-chip { display:inline-block; border-radius:999px; padding:4px 8px; font-size:11px; font-weight:800; background:#eef3f0; } .status-chip.pending,.status-chip.processing { color:var(--warn); background:#fff5d9; } .status-chip.approved,.status-chip.success { color:var(--dark); background:var(--soft); } .status-chip.rejected,.status-chip.failed { color:var(--danger); background:#ffedef; }
+    .table-wrap { overflow:auto; } table { border-collapse:collapse; width:100%; min-width:650px; } th,td { padding:12px 14px; border-bottom:1px solid var(--line); text-align:left; font-size:13px; vertical-align:top; } th { color:var(--muted); background:#f9fcfa; font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+    .admin-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:20px; } .metric { padding:17px; } .metric strong { display:block; font-size:25px; margin-top:5px; } .admin-section { margin-bottom:20px; } .admin-section .panel-head { display:flex; justify-content:space-between; gap:12px; align-items:center; }
+    .empty { padding:34px 18px; text-align:center; color:var(--muted); } .right { text-align:right; } .nowrap { white-space:nowrap; }
+    @media (max-width:900px) { .layout { grid-template-columns:1fr; } .order-panel .panel-body { position:static; } .admin-grid { grid-template-columns:repeat(3,1fr); } }
+    @media (max-width:650px) { .shell { width:min(100% - 18px,1180px); padding-top:18px; } .topbar { align-items:start; flex-direction:column; } .top-actions { justify-content:flex-start; } .filters { grid-template-columns:1fr 1fr; padding:13px; } .products { padding:13px; grid-template-columns:1fr 1fr; } .panel-head,.panel-body { padding-left:15px; padding-right:15px; } .admin-grid { grid-template-columns:1fr 1fr; } }
+    @media (max-width:390px) { .products { grid-template-columns:1fr; } .filters { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <section id="authView" class="auth">
+    <div class="panel">
+      <div class="panel-head"><div class="eyebrow">Toko digital</div><h1 style="font-size:34px">Masuk ke toko</h1><p class="hint">Pilih produk, isi data tujuan, lalu bayar memakai saldo akun.</p></div>
+      <div class="panel-body">
+        <div class="auth-tabs"><button id="loginTab" class="secondary" type="button">Login customer</button><button id="registerTab" class="ghost" type="button">Daftar customer</button></div>
+        <form id="authForm">
+          <div class="field"><label for="authUsername">Username</label><input id="authUsername" autocomplete="username" required minlength="3" placeholder="contoh: pelanggan01"></div>
+          <div class="field"><label for="authPassword">Password</label><input id="authPassword" type="password" autocomplete="current-password" required minlength="6" placeholder="Minimal 6 karakter"></div>
+          <button id="authSubmit" class="primary" type="submit">Masuk</button><div id="authMessage" class="message"></div>
+        </form>
+        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+        <button id="adminOpen" class="ghost" type="button">Masuk sebagai admin</button>
+      </div>
+    </div>
+  </section>
+
+  <main id="customerView" class="shell hidden">
+    <header class="topbar">
+      <div><div class="eyebrow">Customer area</div><h1>Toko digital</h1><p class="intro">Pilih kategori, operator, jenis produk, dan varian yang ingin diproses.</p></div>
+      <div class="top-actions"><span id="customerName" class="muted"></span><span id="balance" class="balance">Saldo Rp0</span><button id="customerLogout" class="ghost" type="button">Keluar</button></div>
+    </header>
+    <div class="layout">
+      <section>
+        <div class="panel">
+          <nav class="tabs"><button class="active" data-customer-tab="shop" type="button">Belanja</button><button data-customer-tab="deposit" type="button">Deposit</button><button data-customer-tab="history" type="button">Riwayat</button></nav>
+          <div id="shopTab">
+            <div class="tabs" id="groupTabs"></div>
+            <div class="filters"><select id="categoryFilter"><option value="">Semua kategori</option></select><select id="operatorFilter"><option value="">Semua operator</option></select><select id="typeFilter"><option value="">Semua jenis</option></select><input id="productSearch" type="search" placeholder="Cari produk"></div>
+            <div id="products" class="products"><div class="empty">Memuat katalog...</div></div>
+          </div>
+          <div id="depositTab" class="panel-body hidden">
+            <h2>Deposit saldo</h2><p class="hint">Masukkan nominal. QRIS dinamis akan dibuat otomatis dan permintaan akan masuk ke admin.</p>
+            <form id="depositForm" style="max-width:430px;margin-top:18px"><div class="field"><label for="depositAmount">Nominal deposit</label><input id="depositAmount" type="number" min="10000" step="1000" placeholder="10000" required></div><button class="primary" type="submit">Buat QRIS</button><div id="depositMessage" class="message"></div></form>
+            <div id="qrResult" class="hidden" style="max-width:430px;text-align:center;margin-top:20px"><img id="qrImage" class="qr" alt="QRIS deposit"><strong id="qrAmount"></strong><p id="qrRef" class="hint"></p><p class="hint">Setelah pembayaran, tunggu admin memproses. Status akan diperbarui otomatis.</p></div>
+            <div class="section"><h3>Permintaan deposit saya</h3><div id="depositList" class="table-wrap"></div></div>
+          </div>
+          <div id="historyTab" class="panel-body hidden"><div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><div><h2>Riwayat transaksi</h2><p class="hint">Status akan mengikuti callback provider.</p></div><button id="refreshHistory" class="secondary" type="button">Refresh</button></div><div id="historyList" class="table-wrap" style="margin-top:15px"></div></div>
+        </div>
+      </section>
+      <aside class="panel order-panel"><div class="panel-head"><h2>Pesanan</h2><p class="hint">Saldo akan dipotong saat order dikirim.</p></div><div class="panel-body"><div id="selectedProduct" class="selected-product"><span class="muted">Pilih produk dari katalog.</span></div><form id="orderForm"><div id="targetFields" class="target-fields"></div><button id="orderButton" class="primary" type="submit" disabled>Konfirmasi order</button><div id="orderMessage" class="message"></div></form></div></aside>
+    </div>
+  </main>
+
+  <main id="adminView" class="shell hidden">
+    <header class="topbar"><div><div class="eyebrow">Admin area</div><h1>Dashboard toko</h1><p class="intro">Pantau customer, saldo, deposit, transaksi, dan katalog dari browser.</p></div><div class="top-actions"><button id="adminSync" class="secondary" type="button">Sinkronkan produk API</button><button id="adminLogout" class="ghost" type="button">Keluar</button></div></header>
+    <div id="adminMessage" class="message"></div>
+    <div id="metrics" class="admin-grid"></div>
+    <section class="panel admin-section"><div class="panel-head"><div><h2>Permintaan deposit</h2><p class="hint">Setujui atau tolak deposit yang masuk.</p></div><button class="secondary" data-admin-refresh type="button">Refresh</button></div><div id="adminDeposits" class="table-wrap"></div></section>
+    <section class="panel admin-section"><div class="panel-head"><h2>Customer</h2><button class="secondary" data-admin-refresh type="button">Refresh</button></div><div id="adminCustomers" class="table-wrap"></div></section>
+    <section class="panel admin-section"><div class="panel-head"><h2>Transaksi</h2><button class="secondary" data-admin-refresh type="button">Refresh</button></div><div id="adminTransactions" class="table-wrap"></div></section>
+  </main>
+
+  <script>
+    const state = { mode:"login", catalog:{ groups:[], products:[] }, group:"", product:null, customer:null };
+    const $ = id => document.getElementById(id);
+    const rupiah = value => "Rp" + Number(value || 0).toLocaleString("id-ID");
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, char => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;" }[char]));
+    const statusChip = value => `<span class="status-chip ${esc(value)}">${esc(value)}</span>`;
+    async function api(url, options = {}) {
+      const response = await fetch(url, { credentials:"same-origin", headers:{"Content-Type":"application/json", ...(options.headers || {})}, ...options });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Permintaan gagal.");
+      return body;
+    }
+    function message(id, text, error = false) { const el=$(id); el.textContent=text || ""; el.className="message " + (error ? "error" : "ok"); }
+    function showOnly(id) { ["authView","customerView","adminView"].forEach(item => $(item).classList.toggle("hidden", item !== id)); }
+    function switchAuth(mode) { state.mode=mode; $("loginTab").className=mode==="login"?"secondary":"ghost"; $("registerTab").className=mode==="register"?"secondary":"ghost"; $("authSubmit").textContent=mode==="login"?"Masuk":"Buat akun"; message("authMessage",""); }
+    $("loginTab").onclick=()=>switchAuth("login"); $("registerTab").onclick=()=>switchAuth("register");
+    $("authForm").onsubmit=async event => { event.preventDefault(); const button=$("authSubmit"); button.disabled=true; message("authMessage","Memproses...");
+      try { const body={username:$("authUsername").value,password:$("authPassword").value}; const result=await api(state.mode==="login"?"/api/auth/login":"/api/auth/register",{method:"POST",body:JSON.stringify(body)}); state.customer=result.customer; await showCustomer(); }
+      catch(error) { message("authMessage",error.message,true); } finally { button.disabled=false; }
+    };
+    $("adminOpen").onclick=async()=>{ const key=prompt("Masukkan DASHBOARD_KEY admin:"); if(!key)return; try{await api("/api/admin/login",{method:"POST",body:JSON.stringify({key})}); showAdmin();}catch(error){message("authMessage",error.message,true);} };
+    $("customerLogout").onclick=async()=>{ await api("/api/auth/logout",{method:"POST"}).catch(()=>{}); location.reload(); };
+    $("adminLogout").onclick=async()=>{ await api("/api/auth/logout",{method:"POST"}).catch(()=>{}); location.reload(); };
+    async function showCustomer(){ showOnly("customerView"); $("customerName").textContent="@"+esc(state.customer.username); $("balance").textContent="Saldo "+rupiah(state.customer.saldo); await loadCatalog(); await loadDeposits(); await loadHistory(); setInterval(async()=>{const session=await api("/api/auth/me").catch(()=>null);if(session?.customer){state.customer=session.customer;$("balance").textContent="Saldo "+rupiah(state.customer.saldo);if(!$("depositTab").classList.contains("hidden"))loadDeposits();}},15000); }
+    async function loadCatalog(){ const data=await api("/api/catalog"); state.catalog=data; state.group=data.groups[0]?.id || ""; renderGroupTabs(); renderFilters(); renderProducts(); }
+    function renderGroupTabs(){ $("groupTabs").innerHTML=state.catalog.groups.map(group=>`<button type="button" class="${state.group===group.id?"active":""}" data-group="${esc(group.id)}">${esc(group.label)}</button>`).join("") || `<div class="empty">Belum ada produk dari API.</div>`; document.querySelectorAll("[data-group]").forEach(button=>button.onclick=()=>{state.group=button.dataset.group;renderGroupTabs();renderFilters();renderProducts();}); }
+    function selectOptions(id, values, label){ const el=$(id); const current=el.value; el.innerHTML=`<option value="">${label}</option>`+values.map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join(""); if(values.includes(current))el.value=current; }
+    function renderFilters(){ const rows=state.catalog.products.filter(p=>!state.group||p.groupId===state.group); selectOptions("categoryFilter",[...new Set(rows.map(p=>p.kategoriLabel).filter(Boolean))],"Semua kategori"); selectOptions("operatorFilter",[...new Set(rows.map(p=>p.operator).filter(Boolean))],"Semua operator"); selectOptions("typeFilter",[...new Set(rows.map(p=>p.jenisProduk).filter(Boolean))],"Semua jenis"); }
+    ["categoryFilter","operatorFilter","typeFilter","productSearch"].forEach(id=>$(id).oninput=renderProducts);
+    function renderProducts(){ const term=$("productSearch").value.toLowerCase().trim(); const category=$("categoryFilter").value, operator=$("operatorFilter").value, type=$("typeFilter").value; const rows=state.catalog.products.filter(p=>(!state.group||p.groupId===state.group)&&(!category||p.kategoriLabel===category)&&(!operator||p.operator===operator)&&(!type||p.jenisProduk===type)&&(!term||`${p.label} ${p.kode} ${p.operator} ${p.jenisProduk}`.toLowerCase().includes(term))); $("products").innerHTML=rows.length?rows.map(p=>`<button type="button" class="product ${state.product?.kode===p.kode?"selected":""}" data-product="${esc(p.kode)}"><span class="name">${esc(p.label)}</span><span class="meta">${esc([p.kategoriLabel,p.operator,p.jenisProduk].filter(Boolean).join(" • "))}</span><span class="price">${rupiah(p.hargaJualEfektif)}</span></button>`).join(""):`<div class="empty">Produk tidak ditemukan.</div>`; document.querySelectorAll("[data-product]").forEach(button=>button.onclick=()=>selectProduct(button.dataset.product)); }
+    function selectProduct(code){ state.product=state.catalog.products.find(p=>p.kode===code); renderProducts(); $("selectedProduct").innerHTML=`<strong>${esc(state.product.label)}</strong><span class="hint">${esc(state.product.kode)} · ${rupiah(state.product.hargaJualEfektif)}</span>`; $("targetFields").innerHTML=`<div class="field"><label for="target">Data tujuan</label><input id="target" required maxlength="300" placeholder="Nomor HP / ID pelanggan / tujuan produk"></div>`; $("orderButton").disabled=false; message("orderMessage",""); }
+    $("orderForm").onsubmit=async event=>{event.preventDefault();if(!state.product)return;const button=$("orderButton");button.disabled=true;message("orderMessage","Mengirim order...");try{const result=await api("/api/customer/orders",{method:"POST",body:JSON.stringify({kode:state.product.kode,targetData:{tujuan:$("target").value}})});state.customer=result.customer;$("balance").textContent="Saldo "+rupiah(state.customer.saldo);message("orderMessage",`Order ${result.transaction.status}. Referensi ${result.transaction.requestRef}`);await loadHistory();}catch(error){message("orderMessage",error.message,true);}finally{button.disabled=false;}};
+    document.querySelectorAll("[data-customer-tab]").forEach(button=>button.onclick=()=>{document.querySelectorAll("[data-customer-tab]").forEach(item=>item.classList.toggle("active",item===button));["shopTab","depositTab","historyTab"].forEach(id=>$(id).classList.add("hidden"));$(button.dataset.customerTab+"Tab").classList.remove("hidden");if(button.dataset.customerTab==="deposit")loadDeposits();if(button.dataset.customerTab==="history")loadHistory();});
+    $("depositForm").onsubmit=async event=>{event.preventDefault();const button=event.submitter;button.disabled=true;message("depositMessage","Membuat QRIS...");try{const result=await api("/api/customer/deposits",{method:"POST",body:JSON.stringify({amount:$("depositAmount").value})});$("qrResult").classList.remove("hidden");$("qrImage").src=result.deposit.qrDataUrl;$("qrAmount").textContent=rupiah(result.deposit.amount);$("qrRef").textContent="Referensi: "+result.deposit.requestRef;message("depositMessage","QRIS berhasil dibuat.");await loadDeposits();}catch(error){message("depositMessage",error.message,true);}finally{button.disabled=false;}};
+    function depositRows(rows){return rows.length?`<table><thead><tr><th>Referensi</th><th>Nominal</th><th>Status</th><th>Waktu</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.requestRef)}</td><td>${rupiah(row.amount)}</td><td>${statusChip(row.status)}</td><td>${new Date(row.createdAt).toLocaleString("id-ID")}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">Belum ada deposit.</div>`;}
+    async function loadDeposits(){const data=await api("/api/customer/deposits");$("depositList").innerHTML=depositRows(data.deposits);}
+    function transactionRows(rows){return rows.length?`<table><thead><tr><th>Produk</th><th>Tujuan</th><th>Harga</th><th>Status</th><th>Waktu</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>${esc(row.productLabel)}</strong><div class="hint">${esc(row.requestRef)}</div></td><td>${esc(Object.values(row.targetData||{}).join(", "))}</td><td>${rupiah(row.amount)}</td><td>${statusChip(row.status)}</td><td>${new Date(row.createdAt).toLocaleString("id-ID")}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">Belum ada transaksi.</div>`;}
+    async function loadHistory(){const data=await api("/api/customer/transactions");$("historyList").innerHTML=transactionRows(data.transactions);}
+    $("refreshHistory").onclick=loadHistory;
+    async function showAdmin(){showOnly("adminView");await refreshAdmin();}
+    async function refreshAdmin(){try{const [summary,customers,deposits,transactions]=await Promise.all([api("/api/admin/summary"),api("/api/admin/customers"),api("/api/admin/deposits"),api("/api/admin/transactions")]);$("metrics").innerHTML=[["Customer",summary.customers],["Saldo beredar",rupiah(summary.balance)],["Transaksi",summary.transactions],["Deposit pending",summary.pendingDeposits],["Produk aktif",summary.products]].map(item=>`<div class="panel metric"><span class="hint">${item[0]}</span><strong>${item[1]}</strong></div>`).join(""); $("adminCustomers").innerHTML=customerRows(customers.customers);$("adminDeposits").innerHTML=adminDepositRows(deposits.deposits);$("adminTransactions").innerHTML=transactionRows(transactions.transactions);}catch(error){message("adminMessage",error.message,true);}}
+    function customerRows(rows){return rows.length?`<table><thead><tr><th>Username</th><th>Saldo</th><th>Total deposit</th><th>Transaksi</th><th>Terdaftar</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>@${esc(row.username)}</strong></td><td>${rupiah(row.saldo)}</td><td>${rupiah(row.totalDeposit)}</td><td>${row.totalTransaksi}</td><td>${new Date(row.createdAt).toLocaleDateString("id-ID")}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">Belum ada customer.</div>`;}
+    function adminDepositRows(rows){return rows.length?`<table><thead><tr><th>Customer</th><th>Nominal</th><th>Status</th><th>Waktu</th><th>Aksi</th></tr></thead><tbody>${rows.map(row=>`<tr><td><strong>@${esc(row.username)}</strong><div class="hint">${esc(row.requestRef)}</div></td><td>${rupiah(row.amount)}</td><td>${statusChip(row.status)}</td><td>${new Date(row.createdAt).toLocaleString("id-ID")}</td><td>${row.status==="pending"?`<button class="secondary decision" data-id="${row.id}" data-status="approved" type="button">Setujui</button> <button class="danger decision" data-id="${row.id}" data-status="rejected" type="button">Tolak</button>`:"-"}</td></tr>`).join("")}</tbody></table>`:`<div class="empty">Belum ada permintaan deposit.</div>`;}
+    document.querySelectorAll("[data-admin-refresh]").forEach(button=>button.onclick=refreshAdmin);
+    $("adminDeposits").onclick=async event=>{const button=event.target.closest(".decision");if(!button)return;button.disabled=true;try{await api(`/api/admin/deposits/${button.dataset.id}/decision`,{method:"POST",body:JSON.stringify({status:button.dataset.status})});await refreshAdmin();}catch(error){message("adminMessage",error.message,true);}finally{button.disabled=false;}};
+    $("adminSync").onclick=async()=>{const button=$("adminSync");button.disabled=true;message("adminMessage","Mengambil katalog dari API...");try{const result=await api("/api/admin/products/sync",{method:"POST"});message("adminMessage",`${result.imported} produk tersimpan.`);await refreshAdmin();}catch(error){message("adminMessage",error.message,true);}finally{button.disabled=false;}};
+    async function boot(){try{const session=await api("/api/auth/me");if(session.authenticated&&session.role==="admin")return showAdmin();if(session.authenticated&&session.customer){state.customer=session.customer;return showCustomer();}}catch(error){}showOnly("authView");}
+    boot();
+  </script>
+</body>
+</html>
