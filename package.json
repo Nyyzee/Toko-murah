@@ -1,0 +1,22 @@
+{
+  "name": "telegram-dana-bot",
+  "version": "2.0.0",
+  "description": "Telegram Bot Top Up DANA & Game — dengan sistem saldo reseller PostgreSQL",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "md5": "^2.3.0",
+    "node-telegram-bot-api": "^0.66.0",
+    "openai": "^4.52.0",
+    "pg": "^8.12.0",
+    "qrcode": "^1.5.3",
+    "googleapis": "^144.0.0"
+  }
+}
