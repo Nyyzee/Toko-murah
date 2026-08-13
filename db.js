@@ -1,6 +1,6 @@
 // =========================================
 // DATABASE — PostgreSQL
-// Customer, saldo, deposit, transaksi, dan katalog produk.
+// Customer, saldo, deposit, transaksi, katalog produk, sync config, app settings.
 // =========================================
 
 const { Pool } = require("pg");
@@ -34,8 +34,6 @@ async function initDB() {
         `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS spreadsheet_id VARCHAR(200)`
     ];
     for (const sql of resellerColumns) await pool.query(sql);
-    // Password sekarang dipakai bersama username, jadi tidak boleh unik
-    // antar customer. Data password lama tetap dipertahankan.
     await pool.query(`ALTER TABLE resellers DROP CONSTRAINT IF EXISTS resellers_password_key`);
 
     await pool.query(`
@@ -116,7 +114,28 @@ async function initDB() {
         ON web_transactions (customer_id, created_at DESC);
     `);
 
-    console.log("[DB] Customer, saldo, deposit, transaksi, dan katalog siap.");
+    // Tabel untuk pengaturan aplikasi (markup persen, dll.)
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key        VARCHAR(100) PRIMARY KEY,
+            value      TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMPTZ DEFAULT NOW()
+        );
+    `);
+
+    // Tabel untuk konfigurasi sinkronisasi produk
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS sync_config (
+            id           SERIAL PRIMARY KEY,
+            kategori_id  VARCHAR(100) NOT NULL,
+            kategori_label VARCHAR(160) NOT NULL DEFAULT '',
+            operator     VARCHAR(160) NOT NULL DEFAULT '',
+            jenis_produk VARCHAR(160) NOT NULL DEFAULT '',
+            created_at   TIMESTAMPTZ DEFAULT NOW()
+        );
+    `);
+
+    console.log("[DB] Customer, saldo, deposit, transaksi, katalog, sinkronisasi, dan pengaturan siap.");
 }
 
 function normalizeUsername(username) {
@@ -198,6 +217,51 @@ async function getAllCustomers() {
         totalTransaksi: Number(row.total_transaksi || 0),
         createdAt: row.created_at
     }));
+}
+
+async function updateCustomer(id, data) {
+    const fields = [];
+    const values = [];
+    let idx = 1;
+
+    if (data.password !== undefined && data.password !== null && data.password !== "") {
+        if (String(data.password).length < 6) throw new Error("Password minimal 6 karakter.");
+        fields.push(`password = $${idx++}`);
+        values.push(String(data.password));
+    }
+    if (data.saldo !== undefined && data.saldo !== null) {
+        const saldo = Number(data.saldo);
+        if (!Number.isSafeInteger(saldo) || saldo < 0) throw new Error("Saldo tidak valid.");
+        fields.push(`saldo = $${idx++}`);
+        values.push(saldo);
+    }
+
+    if (fields.length === 0) throw new Error("Tidak ada data yang diubah.");
+    values.push(id);
+    const result = await pool.query(
+        `UPDATE resellers SET ${fields.join(", ")} WHERE id = $${idx} RETURNING *`,
+        values
+    );
+    return safeCustomer(result.rows[0]);
+}
+
+async function adjustCustomerSaldo(id, amount, operation = "add") {
+    const num = Number(amount);
+    if (!Number.isSafeInteger(num) || num <= 0) throw new Error("Jumlah harus lebih dari 0.");
+    const sql = operation === "subtract"
+        ? `UPDATE resellers SET saldo = GREATEST(0, saldo - $1) WHERE id = $2 RETURNING *`
+        : `UPDATE resellers SET saldo = saldo + $1 WHERE id = $2 RETURNING *`;
+    const result = await pool.query(sql, [num, id]);
+    if (!result.rows[0]) throw new Error("Customer tidak ditemukan.");
+    return safeCustomer(result.rows[0]);
+}
+
+async function deleteCustomer(id) {
+    const result = await pool.query(
+        `DELETE FROM resellers WHERE id = $1 RETURNING id`,
+        [id]
+    );
+    return result.rows[0] ? true : false;
 }
 
 async function topupSaldo(id, amount) {
@@ -449,7 +513,7 @@ async function getCatalogProducts(includeInactive = false) {
                label, nominal, harga_jual, metadata, active, created_at, updated_at
         FROM catalog_products
         ${includeInactive ? "" : "WHERE active = TRUE"}
-        ORDER BY group_id, kategori_label, operator, jenis_produk, nominal, id
+        ORDER BY group_id, kategori_label, operator, jenis_produk, nominal ASC, id
     `);
     return result.rows;
 }
@@ -469,7 +533,11 @@ async function replaceCatalogProducts(products) {
     const client = await pool.connect();
     try {
         await client.query("BEGIN");
-        await client.query(`UPDATE catalog_products SET active = FALSE, updated_at = NOW()`);
+        // Katalog aktif harus mencerminkan hasil filter sinkronisasi saat ini.
+        // Produk di luar pilihan admin dinonaktifkan, bukan ikut tampil di customer.
+        await client.query(
+            `UPDATE catalog_products SET active = FALSE, updated_at = NOW()`
+        );
         for (const product of products) {
             await client.query(
                 `INSERT INTO catalog_products
@@ -511,6 +579,184 @@ async function replaceCatalogProducts(products) {
     }
 }
 
+// =========================================
+// CRUD PRODUK MANUAL
+// =========================================
+
+async function createCatalogProduct(product) {
+    const result = await pool.query(
+        `INSERT INTO catalog_products
+            (kode, kategori_id, kategori_label, group_id, operator, jenis_produk,
+             label, nominal, harga_jual, metadata, active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, TRUE)
+         RETURNING *`,
+        [
+            product.kode,
+            product.kategoriId || "lainnya",
+            product.kategoriLabel || product.kategoriId || "Lainnya",
+            product.groupId || "lainnya",
+            product.operator || "",
+            product.jenisProduk || "",
+            product.label,
+            product.nominal,
+            product.hargaJual ?? null
+        ]
+    );
+    return result.rows[0];
+}
+
+async function updateCatalogProduct(id, product) {
+    const result = await pool.query(
+        `UPDATE catalog_products SET
+            kode = $1, kategori_id = $2, kategori_label = $3, group_id = $4,
+            operator = $5, jenis_produk = $6, label = $7,
+            nominal = $8, harga_jual = $9, active = $10, updated_at = NOW()
+         WHERE id = $11
+         RETURNING *`,
+        [
+            product.kode,
+            product.kategoriId || "lainnya",
+            product.kategoriLabel || product.kategoriId || "Lainnya",
+            product.groupId || "lainnya",
+            product.operator || "",
+            product.jenisProduk || "",
+            product.label,
+            product.nominal,
+            product.hargaJual ?? null,
+            product.active !== false,
+            id
+        ]
+    );
+    return result.rows[0] || null;
+}
+
+async function deactivateCatalogProduct(id) {
+    const result = await pool.query(
+        `UPDATE catalog_products SET active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [id]
+    );
+    return result.rows[0] || null;
+}
+
+async function deleteCatalogProduct(id) {
+    const result = await pool.query(
+        `DELETE FROM catalog_products WHERE id = $1 RETURNING id`,
+        [id]
+    );
+    return result.rows[0] ? true : false;
+}
+
+async function bulkUpdateCatalogProducts(bulk) {
+    const conditions = [];
+    const values = [];
+    let idx = 1;
+
+    if (bulk.kategoriId) {
+        conditions.push(`kategori_id = $${idx++}`);
+        values.push(bulk.kategoriId);
+    }
+    if (bulk.namaContains) {
+        conditions.push(`label ILIKE $${idx++}`);
+        values.push(`%${bulk.namaContains}%`);
+    }
+
+    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+    const setClauses = [];
+    if (bulk.hargaJualMode === "set") {
+        setClauses.push(`harga_jual = $${idx++}`);
+        values.push(bulk.hargaJual);
+    } else if (bulk.hargaJualMode === "clear") {
+        setClauses.push(`harga_jual = NULL`);
+    }
+    setClauses.push("updated_at = NOW()");
+
+    const result = await pool.query(
+        `UPDATE catalog_products SET ${setClauses.join(", ")} ${where} RETURNING id`,
+        values
+    );
+    return { updatedCount: result.rowCount };
+}
+
+async function getNextCatalogNominal(kategoriId, step) {
+    const result = await pool.query(
+        `SELECT COALESCE(MAX(nominal), 0) AS max_nominal
+         FROM catalog_products WHERE kategori_id = $1`,
+        [kategoriId]
+    );
+    return Number(result.rows[0].max_nominal || 0) + step;
+}
+
+// =========================================
+// APP SETTINGS (markup persen, dll.)
+// =========================================
+
+async function getAppSetting(key) {
+    const result = await pool.query(
+        `SELECT value FROM app_settings WHERE key = $1`,
+        [key]
+    );
+    return result.rows[0]?.value ?? null;
+}
+
+async function setAppSetting(key, value) {
+    await pool.query(
+        `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+        [key, String(value)]
+    );
+}
+
+async function getMarkupPersen() {
+    const val = await getAppSetting("markup_persen");
+    return val !== null ? Number(val) : 0;
+}
+
+// =========================================
+// SYNC CONFIG
+// =========================================
+
+async function getSyncConfig() {
+    const result = await pool.query(
+        `SELECT id, kategori_id, kategori_label, operator, jenis_produk
+         FROM sync_config ORDER BY id`
+    );
+    return result.rows.map(row => ({
+        id: Number(row.id),
+        kategoriId: row.kategori_id,
+        kategoriLabel: row.kategori_label,
+        operator: row.operator,
+        jenisProduk: row.jenis_produk
+    }));
+}
+
+async function saveSyncConfig(rules) {
+    // rules = [{ kategoriId, kategoriLabel, operator, jenisProduk }, ...]
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN");
+        await client.query(`DELETE FROM sync_config`);
+        for (const rule of rules) {
+            await client.query(
+                `INSERT INTO sync_config (kategori_id, kategori_label, operator, jenis_produk)
+                 VALUES ($1, $2, $3, $4)`,
+                [
+                    rule.kategoriId || "",
+                    rule.kategoriLabel || "",
+                    rule.operator || "",
+                    rule.jenisProduk || ""
+                ]
+            );
+        }
+        await client.query("COMMIT");
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 async function getAdminSummary() {
     const result = await pool.query(`
         SELECT
@@ -536,6 +782,9 @@ module.exports = {
     createCustomer,
     getCustomerById,
     getAllCustomers,
+    updateCustomer,
+    adjustCustomerSaldo,
+    deleteCustomer,
     topupSaldo,
     createDepositRequest,
     getCustomerDeposits,
@@ -548,5 +797,16 @@ module.exports = {
     getCatalogProducts,
     getCatalogProductByCode,
     replaceCatalogProducts,
+    createCatalogProduct,
+    updateCatalogProduct,
+    deactivateCatalogProduct,
+    deleteCatalogProduct,
+    bulkUpdateCatalogProducts,
+    getNextCatalogNominal,
+    getAppSetting,
+    setAppSetting,
+    getMarkupPersen,
+    getSyncConfig,
+    saveSyncConfig,
     getAdminSummary
 };
