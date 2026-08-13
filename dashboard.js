@@ -251,16 +251,16 @@ function sendDepositNotification(bot, deposit, amount, username) {
         return;
     }
     const text =
-        "[DEPOSIT BARU] ð° DEPOSIT BARU MASUK\n" +
-        `[CUSTOMER] ð¤ @${username || deposit.customer_id}\n` +
-        `[NOMINAL] ðµ Rp${Number(amount).toLocaleString("id-ID")}\n` +
-        `[REF] ð ${deposit.request_ref}\n\n` +
+        "[DEPOSIT BARU] 💰 DEPOSIT BARU MASUK\n" +
+        `[CUSTOMER] 👤 @${username || deposit.customer_id}\n` +
+        `[NOMINAL] 💵 Rp${Number(amount).toLocaleString("id-ID")}\n` +
+        `[REF] 🔖 ${deposit.request_ref}\n\n` +
         `Setujui atau tolak deposit ini:`;
     bot.sendMessage(OWNER_CHAT_ID, text, {
         reply_markup: {
             inline_keyboard: [[
-                { text: "SETUJUI â", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
-                { text: "TOLAK â", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
+                { text: "SETUJUI ✅", callback_data: `DEPOSIT_APPROVE_${deposit.id}` },
+                { text: "TOLAK ❌", callback_data: `DEPOSIT_REJECT_${deposit.id}` }
             ]]
         }
     }).catch(error => console.error("[TELEGRAM DEPOSIT]", error.message));
@@ -490,7 +490,7 @@ function startWebApp(bot) {
     });
 
     // =========================================
-    // ADMIN â Ringkasan & Data
+    // ADMIN — Ringkasan & Data
     // =========================================
 
     app.get("/api/admin/summary", requireAdmin, async (req, res) => {
@@ -553,12 +553,12 @@ function startWebApp(bot) {
             );
             // Kirim notifikasi Telegram ke admin setelah memproses dari dashboard
             if (bot && OWNER_CHAT_ID) {
-                const statusText = result.status === "approved" ? "DITERIMA â" : "DITOLAK â";
+                const statusText = result.status === "approved" ? "DITERIMA ✅" : "DITOLAK ❌";
                 bot.sendMessage(
                     OWNER_CHAT_ID,
                     `Deposit ${statusText}\n` +
-                    `ð¤ @${result.username}\n` +
-                    `ð° Rp${Number(result.amount).toLocaleString("id-ID")}`
+                    `👤 @${result.username}\n` +
+                    `💰 Rp${Number(result.amount).toLocaleString("id-ID")}`
                 ).catch(() => {});
             }
             res.json({ deposit: depositPayload(result) });
@@ -572,7 +572,7 @@ function startWebApp(bot) {
     });
 
     // =========================================
-    // ADMIN â Produk CRUD
+    // ADMIN — Produk CRUD
     // =========================================
 
     app.get("/api/admin/products", requireAdmin, async (req, res) => {
@@ -652,7 +652,7 @@ function startWebApp(bot) {
     });
 
     // =========================================
-    // ADMIN â Sinkronisasi Produk
+    // ADMIN — Sinkronisasi Produk
     // =========================================
 
     // Ambil opsi dari API (untuk UI konfigurasi sync)
@@ -708,7 +708,7 @@ function startWebApp(bot) {
     });
 
     // =========================================
-    // ADMIN â Pengaturan (markup persen, dll.)
+    // ADMIN — Pengaturan (markup persen, dll.)
     // =========================================
 
     app.get("/api/admin/settings", requireAdmin, async (req, res) => {

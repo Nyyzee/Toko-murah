@@ -36,6 +36,22 @@ function textValue(value, fallback = "") {
     return value === undefined || value === null ? fallback : String(value).trim();
 }
 
+function relationMap(rows, idKeys, labelKeys) {
+    const map = new Map();
+    for (const row of Array.isArray(rows) ? rows : []) {
+        const id = idKeys.map(key => row?.[key]).find(value =>
+            value !== undefined && value !== null && String(value) !== ""
+        );
+        const label = labelKeys.map(key => row?.[key]).find(value =>
+            value !== undefined && value !== null && String(value).trim() !== ""
+        );
+        if (id !== undefined && label !== undefined) {
+            map.set(String(id), String(label).trim());
+        }
+    }
+    return map;
+}
+
 function normalizedGroup(value, category, type) {
     const text = `${value || ""} ${category || ""} ${type || ""}`.toLowerCase();
     if (/ewallet|e-wallet|dana|ovo|gopay|shopeepay|linkaja/.test(text)) return "ewallet";
@@ -70,10 +86,21 @@ async function fetchCatalogProducts() {
         );
     }
 
-    const data = response.data;
-    const rawProducts = Array.isArray(data)
-        ? data
-        : data?.data?.produk || data?.data?.products || data?.products || [];
+    const payload = response.data;
+    if (payload?.status === 0 || payload?.status === "0") {
+        throw new Error(payload.error_msg || payload.message || "API TokoVoucher menolak permintaan.");
+    }
+
+    const data = payload?.data || payload;
+    const categoryRows = data?.category || data?.categories || [];
+    const operatorRows = data?.operator || data?.operators || [];
+    const typeRows = data?.jenis || data?.types || [];
+    const categoryNames = relationMap(categoryRows, ["id", "category_id"], ["nama", "name", "category_name"]);
+    const operatorNames = relationMap(operatorRows, ["id", "operator_id"], ["nama", "name", "operator_produk", "operator_name"]);
+    const typeNames = relationMap(typeRows, ["id", "jenis_id"], ["nama", "name", "jenis_name", "product_type"]);
+    const rawProducts = Array.isArray(payload)
+        ? payload
+        : data?.produk || data?.products || payload?.products || [];
     if (!Array.isArray(rawProducts)) {
         throw new Error("Response API produk tidak memiliki daftar produk.");
     }
@@ -82,19 +109,24 @@ async function fetchCatalogProducts() {
         .filter(item => item.status !== 0 && item.active !== false)
         .map((item, index) => {
             const kode = textValue(item.kode_produk || item.kode || item.code);
+            const rawCategoryId = item.kategori_id || item.category_id || item.categoryId;
             const categoryId = textValue(
-                item.kategori_id || item.category_id || item.kategori || item.category,
+                rawCategoryId || item.kategori || item.category,
                 "lainnya"
             ).toLowerCase().replace(/\s+/g, "_");
             const categoryLabel = textValue(
-                item.kategori_label || item.category_label || item.kategori || item.category,
-                categoryId
+                item.kategori_label || item.category_label || item.category_name ||
+                categoryNames.get(String(rawCategoryId)) || item.kategori || item.category,
+                categoryNames.get(String(rawCategoryId)) || categoryId
             );
             const type = textValue(
-                item.jenis_produk || item.product_type || item.type || item.jenis
+                item.jenis_produk || item.product_type || item.type || item.jenis_name ||
+                typeNames.get(String(item.jenis_id || item.type_id || item.jenisId)) || item.jenis,
+                typeNames.get(String(item.jenis_id || item.type_id || item.jenisId))
             );
             const operator = textValue(
-                item.operator || item.operator_name || item.provider
+                item.operator || item.operator_name || item.operator_produk ||
+                operatorNames.get(String(item.operator_id || item.operatorId)) || item.provider
             );
             const nominal = Number(
                 item.nominal || item.price || item.harga || item.cost || 0
@@ -124,7 +156,12 @@ async function fetchCatalogProducts() {
                 ),
                 nominal,
                 hargaJual,
-                metadata: item
+                metadata: {
+                    ...item,
+                    category: categoryRows.find(row => String(row.id) === String(rawCategoryId)) || null,
+                    operator: operatorRows.find(row => String(row.id) === String(item.operator_id || item.operatorId)) || null,
+                    jenis: typeRows.find(row => String(row.id) === String(item.jenis_id || item.type_id || item.jenisId)) || null
+                }
             };
         })
         .filter(Boolean);
@@ -162,7 +199,7 @@ async function fetchCatalogOptions() {
             return {
                 ...category,
                 displayLabel: isOnlyId
-                    ? `Kategori ${category.id}${category.sampleProduct ? ` â contoh: ${category.sampleProduct}` : ""}`
+                    ? `Kategori ${category.id}${category.sampleProduct ? ` — contoh: ${category.sampleProduct}` : ""}`
                     : rawLabel
             };
         }).sort((a, b) => a.displayLabel.localeCompare(b.displayLabel)),
@@ -175,7 +212,7 @@ async function fetchCatalogOptions() {
 /**
  * Mengambil katalog lalu filter sesuai syncConfig.
  * syncConfig = [{ kategoriId, operator, jenisProduk }, ...]
- * Jika kosong â tolak agar sistem tidak mengambil seluruh katalog.
+ * Jika kosong → tolak agar sistem tidak mengambil seluruh katalog.
  */
 async function fetchCatalogFiltered(syncConfig) {
     const all = await fetchCatalogProducts();
@@ -193,7 +230,7 @@ async function fetchCatalogFiltered(syncConfig) {
 }
 
 // =========================================
-// TOPUP â Generik untuk semua produk
+// TOPUP — Generik untuk semua produk
 // =========================================
 
 async function topup({ refId, tujuan, kode }) {

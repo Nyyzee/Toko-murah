@@ -54,11 +54,11 @@ async function handleDepositCallback(query) {
         const chatTarget = query.message?.chat?.id || OWNER_CHAT_ID;
         await bot.sendMessage(
             chatTarget,
-            `[DEPOSIT ${result.status === "approved" ? "DITERIMA" : "DITOLAK"}] ${result.status === "approved" ? "â" : "â"}\n` +
-            `[CUSTOMER] ð¤ @${result.username}\n` +
-            `[NOMINAL] ð° Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
+            `[DEPOSIT ${result.status === "approved" ? "DITERIMA" : "DITOLAK"}] ${result.status === "approved" ? "✅" : "❌"}\n` +
+            `[CUSTOMER] 👤 @${result.username}\n` +
+            `[NOMINAL] 💰 Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
             (result.status === "approved"
-                ? `[SALDO] ð³ Rp${Number(result.saldo).toLocaleString("id-ID")}`
+                ? `[SALDO] 💳 Rp${Number(result.saldo).toLocaleString("id-ID")}`
                 : "")
         );
     } catch (error) {
@@ -76,7 +76,7 @@ if (bot) {
         if (!isOwner(message)) return bot.sendMessage(message.chat.id, "Bot aktif. Perintah admin hanya tersedia untuk admin utama.");
         await bot.sendMessage(
             message.chat.id,
-            "ð TOKO MURAH\n\n" +
+            "🛒 TOKO MURAH\n\n" +
             "Perintah admin:\n" +
             "/status - ringkasan toko dan deposit pending\n" +
             "/help - melihat bantuan\n\n" +
@@ -94,11 +94,11 @@ if (bot) {
             const pending = deposits.filter(item => item.status === "pending").length;
             await bot.sendMessage(
                 message.chat.id,
-                "ð STATUS TOKO MURAH\n\n" +
-                `ð¥ Customer: ${summary.customers}\n` +
-                `ð¦ Produk aktif: ${summary.products}\n` +
-                `ð§¾ Transaksi: ${summary.transactions}\n` +
-                `ð° Deposit pending: ${pending}`
+                "📊 STATUS TOKO MURAH\n\n" +
+                `👥 Customer: ${summary.customers}\n` +
+                `📦 Produk aktif: ${summary.products}\n` +
+                `🧾 Transaksi: ${summary.transactions}\n` +
+                `💰 Deposit pending: ${pending}`
             );
         } catch (error) {
             await bot.sendMessage(message.chat.id, `Gagal mengambil status: ${error.message}`);
@@ -115,7 +115,7 @@ if (bot) {
     });
     console.log("[TELEGRAM] Bot aktif, notifikasi deposit akan dikirim ke admin.");
 } else {
-    console.warn("[TELEGRAM] BOT_TOKEN tidak diisi â notifikasi Telegram dinonaktifkan.");
+    console.warn("[TELEGRAM] BOT_TOKEN tidak diisi — notifikasi Telegram dinonaktifkan.");
 }
 
 async function syncCatalogAtStartup() {
