@@ -13,40 +13,22 @@ const {
     PRODUCT_API_KEY
 } = require("./config");
 
-// =========================================
-// BUAT SIGNATURE TRANSAKSI
-// Format: md5(MEMBER_CODE:SECRET_KEY:REF_ID)
-// =========================================
-
 function createSignature(refId) {
     return md5(`${MEMBER_CODE}:${SECRET_KEY}:${refId}`);
 }
-
-// =========================================
-// BUAT SIGNATURE PRODUK
-// Format: md5(MEMBER_CODE:SECRET_KEY)
-// =========================================
 
 function createProductSignature() {
     return md5(`${MEMBER_CODE}:${SECRET_KEY}`);
 }
 
-// =========================================
-// AMBIL HARGA PRODUK DARI API
-// Mengembalikan Map { kode_produk => price }
-// =========================================
-
 async function fetchHargaProduk() {
     const semuaProduk = await fetchCatalogProducts();
-
-    // Buat Map: kode_produk => price (harga beli)
     const hargaMap = new Map();
     for (const p of semuaProduk) {
         if (p.status !== 0 && p.kode) {
             hargaMap.set(p.kode, p.nominal);
         }
     }
-
     return hargaMap;
 }
 
@@ -66,9 +48,7 @@ function normalizedGroup(value, category, type) {
 }
 
 /**
- * Mengambil katalog lengkap dan menormalkan beberapa bentuk response provider.
- * Jika PRODUCT_API_URL diisi, endpoint itu dipakai. Jika kosong, TokoVoucher
- * menjadi sumber katalog default.
+ * Mengambil katalog lengkap dari provider.
  */
 async function fetchCatalogProducts() {
     let response;
@@ -150,16 +130,63 @@ async function fetchCatalogProducts() {
         .filter(Boolean);
 }
 
+/**
+ * Mengambil opsi unik dari katalog API (untuk UI konfigurasi sinkronisasi).
+ * Mengembalikan { categories, operators, types } dari produk yang tersedia.
+ */
+async function fetchCatalogOptions() {
+    const products = await fetchCatalogProducts();
+    const categoryMap = new Map();
+    const operatorSet = new Set();
+    const typeSet = new Set();
+
+    for (const p of products) {
+        if (!categoryMap.has(p.kategoriId)) {
+            categoryMap.set(p.kategoriId, {
+                id: p.kategoriId,
+                label: p.kategoriLabel,
+                groupId: p.groupId
+            });
+        }
+        if (p.operator) operatorSet.add(p.operator);
+        if (p.jenisProduk) typeSet.add(p.jenisProduk);
+    }
+
+    return {
+        categories: [...categoryMap.values()].sort((a, b) => a.label.localeCompare(b.label)),
+        operators: [...operatorSet].sort(),
+        types: [...typeSet].sort(),
+        totalProducts: products.length
+    };
+}
+
+/**
+ * Mengambil katalog lalu filter sesuai syncConfig.
+ * syncConfig = [{ kategoriId, operator, jenisProduk }, ...]
+ * Jika kosong â tolak agar sistem tidak mengambil seluruh katalog.
+ */
+async function fetchCatalogFiltered(syncConfig) {
+    const all = await fetchCatalogProducts();
+    if (!Array.isArray(syncConfig) || syncConfig.length === 0) {
+        throw new Error("Belum ada konfigurasi sinkronisasi. Pilih kategori, operator, atau jenis produk terlebih dahulu.");
+    }
+    return all.filter(p => {
+        return syncConfig.some(rule => {
+            const matchKat = !rule.kategoriId || p.kategoriId === rule.kategoriId;
+            const matchOp  = !rule.operator   || p.operator   === rule.operator;
+            const matchJenis = !rule.jenisProduk || p.jenisProduk === rule.jenisProduk;
+            return matchKat && matchOp && matchJenis;
+        });
+    });
+}
+
 // =========================================
-// TOPUP ÃÂ¢ÃÂÃÂ GENERIK UNTUK SEMUA PRODUK
+// TOPUP â Generik untuk semua produk
 // =========================================
 
 async function topup({ refId, tujuan, kode }) {
-
     try {
-
         const signature = createSignature(refId);
-
         const payload = {
             member_code: MEMBER_CODE,
             ref_id:      refId,
@@ -168,24 +195,15 @@ async function topup({ refId, tujuan, kode }) {
             server_id:   "",
             signature:   signature
         };
-
         console.log("[TOPUP] Request payload:", JSON.stringify(payload));
-
         const response = await axios.post(
             `${API_BASE_URL}/v1/transaksi`,
             payload,
-            {
-                headers: { "Content-Type": "application/json" },
-                timeout: 30000
-            }
+            { headers: { "Content-Type": "application/json" }, timeout: 30000 }
         );
-
         console.log("[TOPUP] Response:", JSON.stringify(response.data));
-
         return response.data;
-
     } catch (error) {
-
         if (error.response) {
             console.log("[TOPUP] Error response:", JSON.stringify(error.response.data));
             return {
@@ -195,15 +213,18 @@ async function topup({ refId, tujuan, kode }) {
                          "Terjadi kesalahan."
             };
         }
-
         console.log("[TOPUP] Network error:", error.message);
         return {
             status:  "gagal",
             message: error.message || "Tidak dapat terhubung ke server."
         };
-
     }
-
 }
 
-module.exports = { topup, fetchHargaProduk, fetchCatalogProducts };
+module.exports = {
+    topup,
+    fetchHargaProduk,
+    fetchCatalogProducts,
+    fetchCatalogOptions,
+    fetchCatalogFiltered
+};
