@@ -145,7 +145,10 @@ async function fetchCatalogOptions() {
             categoryMap.set(p.kategoriId, {
                 id: p.kategoriId,
                 label: p.kategoriLabel,
-                groupId: p.groupId
+                groupId: p.groupId,
+                sampleProduct: p.label,
+                sampleOperator: p.operator,
+                sampleType: p.jenisProduk
             });
         }
         if (p.operator) operatorSet.add(p.operator);
@@ -153,7 +156,16 @@ async function fetchCatalogOptions() {
     }
 
     return {
-        categories: [...categoryMap.values()].sort((a, b) => a.label.localeCompare(b.label)),
+        categories: [...categoryMap.values()].map(category => {
+            const rawLabel = String(category.label || "").trim();
+            const isOnlyId = !rawLabel || rawLabel.toLowerCase().replace(/[\s_-]/g, "") === category.id.toLowerCase().replace(/[\s_-]/g, "");
+            return {
+                ...category,
+                displayLabel: isOnlyId
+                    ? `Kategori ${category.id}${category.sampleProduct ? ` â contoh: ${category.sampleProduct}` : ""}`
+                    : rawLabel
+            };
+        }).sort((a, b) => a.displayLabel.localeCompare(b.displayLabel)),
         operators: [...operatorSet].sort(),
         types: [...typeSet].sort(),
         totalProducts: products.length
