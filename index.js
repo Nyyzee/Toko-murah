@@ -12,7 +12,9 @@ const {
 const {
     initDB,
     decideDeposit,
-    getCustomerById
+    getCustomerById,
+    getAdminSummary,
+    getAdminDeposits
 } = require("./db");
 const { startWebApp } = require("./dashboard");
 const { loadProductsFromDB } = require("./products");
@@ -52,11 +54,11 @@ async function handleDepositCallback(query) {
         const chatTarget = query.message?.chat?.id || OWNER_CHAT_ID;
         await bot.sendMessage(
             chatTarget,
-            `â Deposit ${result.status === "approved" ? "DITERIMA â" : "DITOLAK â"}\n` +
-            `ð¤ Customer: @${result.username}\n` +
-            `ð° Nominal: Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
+            `[DEPOSIT ${result.status === "approved" ? "DITERIMA" : "DITOLAK"}] ${result.status === "approved" ? "â" : "â"}\n` +
+            `[CUSTOMER] ð¤ @${result.username}\n` +
+            `[NOMINAL] ð° Rp${Number(result.amount).toLocaleString("id-ID")}\n` +
             (result.status === "approved"
-                ? `ð³ Saldo sekarang: Rp${Number(result.saldo).toLocaleString("id-ID")}`
+                ? `[SALDO] ð³ Rp${Number(result.saldo).toLocaleString("id-ID")}`
                 : "")
         );
     } catch (error) {
@@ -68,6 +70,41 @@ async function handleDepositCallback(query) {
 }
 
 if (bot) {
+    const isOwner = message => String(message?.from?.id || "") === String(OWNER_CHAT_ID);
+
+    bot.onText(/^\/(start|help)$/i, async message => {
+        if (!isOwner(message)) return bot.sendMessage(message.chat.id, "Bot aktif. Perintah admin hanya tersedia untuk admin utama.");
+        await bot.sendMessage(
+            message.chat.id,
+            "ð TOKO MURAH\n\n" +
+            "Perintah admin:\n" +
+            "/status - ringkasan toko dan deposit pending\n" +
+            "/help - melihat bantuan\n\n" +
+            "Deposit baru akan muncul otomatis dengan tombol Setujui/Tolak."
+        );
+    });
+
+    bot.onText(/^\/status$/i, async message => {
+        if (!isOwner(message)) return bot.sendMessage(message.chat.id, "Perintah ini hanya untuk admin utama.");
+        try {
+            const [summary, deposits] = await Promise.all([
+                getAdminSummary(),
+                getAdminDeposits()
+            ]);
+            const pending = deposits.filter(item => item.status === "pending").length;
+            await bot.sendMessage(
+                message.chat.id,
+                "ð STATUS TOKO MURAH\n\n" +
+                `ð¥ Customer: ${summary.customers}\n` +
+                `ð¦ Produk aktif: ${summary.products}\n` +
+                `ð§¾ Transaksi: ${summary.transactions}\n` +
+                `ð° Deposit pending: ${pending}`
+            );
+        } catch (error) {
+            await bot.sendMessage(message.chat.id, `Gagal mengambil status: ${error.message}`);
+        }
+    });
+
     bot.on("callback_query", query => {
         handleDepositCallback(query).catch(error =>
             console.error("[DEPOSIT CALLBACK]", error.message)
