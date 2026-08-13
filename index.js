@@ -19,7 +19,9 @@ const { loadProductsFromDB } = require("./products");
 const { fetchCatalogProducts } = require("./tokovoucher");
 const { replaceCatalogProducts } = require("./db");
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// Telegram hanya dipakai untuk notifikasi deposit. Aplikasi browser tetap
+// dapat berjalan tanpa Telegram; persetujuan deposit tersedia di dashboard.
+const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
 
 async function handleDepositCallback(query) {
     const data = String(query.data || "");
@@ -63,11 +65,16 @@ async function handleDepositCallback(query) {
     }
 }
 
-bot.on("callback_query", query => {
-    handleDepositCallback(query).catch(error =>
-        console.error("[DEPOSIT CALLBACK]", error.message)
-    );
-});
+if (bot) {
+    bot.on("callback_query", query => {
+        handleDepositCallback(query).catch(error =>
+            console.error("[DEPOSIT CALLBACK]", error.message)
+        );
+    });
+    bot.on("polling_error", error => {
+        console.error("[TELEGRAM]", error.message);
+    });
+}
 
 async function syncCatalogAtStartup() {
     try {
