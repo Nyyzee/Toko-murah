@@ -81,9 +81,27 @@ Arahkan callback status transaksi provider ke:
 https://URL-DEPLOY-ANDA/webhook
 ```
 
-Webhook menggunakan signature `md5(MEMBER_CODE:SECRET_KEY:ref_id)`, sama dengan
-signature transaksi provider. Transaksi yang gagal otomatis mengembalikan saldo
-customer.
+Webhook menerima POST/GET dari TokoVoucher dan memvalidasi header
+`X-TokoVoucher-Authorization` dengan formula:
+
+```text
+md5(MEMBER_CODE:SECRET_KEY:REF_ID)
+```
+
+Status `sukses` diperbarui menjadi **Sukses**, status `gagal` menjadi **Gagal**,
+dan transaksi gagal otomatis mengembalikan saldo customer. Jika webhook belum
+masuk, service juga mengecek transaksi `processing` melalui endpoint:
+
+```text
+GET https://api.tokovoucher.net/v1/transaksi/status
+```
+
+Pengecekan awal dilakukan beberapa detik setelah order, lalu dilanjutkan
+berkala setiap 10 menit sesuai dokumentasi TokoVoucher.
+
+Halaman customer melakukan refresh status deposit dan transaksi otomatis setiap
+10 detik. Jadi ketika admin menyetujui atau menolak deposit dari Telegram atau
+dashboard, status customer berubah tanpa perlu reload halaman.
 
 ## Menjalankan service
 

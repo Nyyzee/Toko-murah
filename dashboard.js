@@ -193,6 +193,7 @@ function customerPayload(customer) {
         username: customer.username,
         nama: customer.nama,
         saldo: Number(customer.saldo || 0),
+        avatarUrl: customer.avatarUrl || "",
         createdAt: customer.createdAt
     } : null;
 }
@@ -217,7 +218,8 @@ function normalizeProviderStatus(response) {
         ""
     ).toLowerCase();
     if (["sukses", "success", "berhasil", "selesai", "1"].includes(value)) return "success";
-    if (["gagal", "failed", "error", "0"].includes(value)) return "failed";
+    if (["gagal", "failed", "error"].includes(value)) return "failed";
+    if (value === "0" || response?.error_msg || response?.data?.error_msg) return "processing";
     return "processing";
 }
 
@@ -361,6 +363,7 @@ function startWebApp(bot) {
             if (req.body?.username !== undefined) data.username = req.body.username;
             if (req.body?.nama !== undefined) data.nama = req.body.nama;
             if (req.body?.password) data.password = req.body.password;
+            if (req.body?.avatarUrl !== undefined) data.avatarUrl = req.body.avatarUrl;
             const customer = await updateCustomer(req.webSession.customerId, data);
             res.json({ customer: customerPayload(customer) });
         } catch (error) {

@@ -31,7 +31,8 @@ async function initDB() {
         `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS first_name    VARCHAR(100)`,
         `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS last_name     VARCHAR(100)`,
         `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS registered_at TIMESTAMPTZ`,
-        `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS spreadsheet_id VARCHAR(200)`
+        `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS spreadsheet_id VARCHAR(200)`,
+        `ALTER TABLE resellers ADD COLUMN IF NOT EXISTS avatar_url TEXT`
     ];
     for (const sql of resellerColumns) await pool.query(sql);
     await pool.query(`ALTER TABLE resellers DROP CONSTRAINT IF EXISTS resellers_password_key`);
@@ -149,6 +150,7 @@ function safeCustomer(row) {
         username: row.username || row.nama,
         nama: row.nama,
         saldo: Number(row.saldo || 0),
+        avatarUrl: row.avatar_url || "",
         createdAt: row.created_at
     };
 }
@@ -228,6 +230,17 @@ async function updateCustomer(id, data) {
         if (String(data.password).length < 6) throw new Error("Password minimal 6 karakter.");
         fields.push(`password = $${idx++}`);
         values.push(String(data.password));
+    }
+    if (data.avatarUrl !== undefined) {
+        const avatarUrl = String(data.avatarUrl || "");
+        if (avatarUrl && !/^data:image\/(jpeg|jpg|png|webp);base64,[a-z0-9+/=\s]+$/i.test(avatarUrl)) {
+            throw new Error("Format foto profil tidak valid.");
+        }
+        if (avatarUrl.length > 450000) {
+            throw new Error("Ukuran foto profil terlalu besar. Pilih foto yang lebih kecil.");
+        }
+        fields.push(`avatar_url = $${idx++}`);
+        values.push(avatarUrl);
     }
     if (data.username !== undefined && data.username !== null) {
         const username = normalizeUsername(data.username);
@@ -520,6 +533,17 @@ async function getAdminTransactions() {
         LIMIT 300
     `);
     return result.rows.map(publicTransaction);
+}
+
+async function getPendingWebTransactions() {
+    const result = await pool.query(`
+        SELECT *
+        FROM web_transactions
+        WHERE status = 'processing'
+        ORDER BY created_at ASC
+        LIMIT 100
+    `);
+    return result.rows;
 }
 
 async function getCatalogProducts(includeInactive = false) {
@@ -835,6 +859,7 @@ module.exports = {
     finishWebTransaction,
     getCustomerTransactions,
     getAdminTransactions,
+    getPendingWebTransactions,
     getCatalogProducts,
     getCatalogProductByCode,
     replaceCatalogProducts,

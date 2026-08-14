@@ -14,12 +14,42 @@ const {
     decideDeposit,
     getCustomerById,
     getAdminSummary,
-    getAdminDeposits
+    getAdminDeposits,
+    getPendingWebTransactions,
+    finishWebTransaction
 } = require("./db");
 const { startWebApp } = require("./dashboard");
 const { loadProductsFromDB } = require("./products");
-const { fetchCatalogFiltered } = require("./tokovoucher");
+const { fetchCatalogFiltered, checkTransactionStatus } = require("./tokovoucher");
 const { replaceCatalogProducts, getSyncConfig } = require("./db");
+
+function normalizeCheckedStatus(response) {
+    const value = String(response?.status ?? response?.data?.status ?? "").toLowerCase();
+    if (["sukses", "success", "berhasil", "selesai", "1"].includes(value)) return "success";
+    if (["gagal", "failed", "fail", "error"].includes(value)) return "failed";
+    if (value === "0" || response?.error_msg || response?.data?.error_msg) return "processing";
+    return "processing";
+}
+
+async function pollPendingTransactions() {
+    const pending = await getPendingWebTransactions();
+    for (const transaction of pending) {
+        try {
+            const response = await checkTransactionStatus(transaction.request_ref);
+            const status = normalizeCheckedStatus(response);
+            if (status === "processing") continue;
+            await finishWebTransaction(
+                transaction.request_ref,
+                status,
+                response?.trx_id || response?.transaction_id || null,
+                response
+            );
+            console.log(`[STATUS] ${transaction.request_ref} diperbarui menjadi ${status}.`);
+        } catch (error) {
+            console.warn(`[STATUS] Gagal mengecek ${transaction.request_ref}: ${error.message}`);
+        }
+    }
+}
 
 // Telegram dipakai untuk notifikasi deposit admin.
 const bot = BOT_TOKEN ? new TelegramBot(BOT_TOKEN, { polling: true }) : null;
@@ -139,6 +169,12 @@ async function start() {
     await initDB();
     await syncCatalogAtStartup();
     startWebApp(bot);
+    setTimeout(() => pollPendingTransactions().catch(error =>
+        console.warn("[STATUS] Polling awal gagal:", error.message)
+    ), 15000);
+    setInterval(() => pollPendingTransactions().catch(error =>
+        console.warn("[STATUS] Polling berkala gagal:", error.message)
+    ), 10 * 60 * 1000);
     console.log("[APP] Login, deposit, dan order tersedia melalui browser.");
 }
 

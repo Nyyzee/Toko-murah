@@ -256,22 +256,49 @@ async function topup({ refId, tujuan, kode }) {
         if (error.response) {
             console.log("[TOPUP] Error response:", JSON.stringify(error.response.data));
             return {
-                status:  "gagal",
+                status:  "pending",
                 message: error.response.data.message ||
                          error.response.data.error_msg ||
-                         "Terjadi kesalahan."
+                         "Provider belum memberi status final.",
+                pending: true
             };
         }
         console.log("[TOPUP] Network error:", error.message);
         return {
-            status:  "gagal",
-            message: error.message || "Tidak dapat terhubung ke server."
+            status:  "pending",
+            message: error.message || "Provider belum memberi status final.",
+            pending: true
         };
+    }
+}
+
+async function checkTransactionStatus(refId) {
+    if (!MEMBER_CODE || !SECRET_KEY) {
+        throw new Error("MEMBER_CODE dan SECRET_KEY belum diatur.");
+    }
+    const signature = createSignature(refId);
+    try {
+        const response = await axios.get(
+            `${API_BASE_URL}/v1/transaksi/status`,
+            {
+                params: {
+                    ref_id: refId,
+                    member_code: MEMBER_CODE,
+                    signature
+                },
+                timeout: 30000
+            }
+        );
+        return response.data;
+    } catch (error) {
+        if (error.response) return error.response.data;
+        throw error;
     }
 }
 
 module.exports = {
     topup,
+    checkTransactionStatus,
     fetchHargaProduk,
     fetchCatalogProducts,
     fetchCatalogOptions,
